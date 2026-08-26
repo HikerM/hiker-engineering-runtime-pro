@@ -23,7 +23,7 @@ public sealed record ServiceDescriptor(
 
 public sealed record ServiceRegistrationResult(string Status, long Generation, int Contracts, int Dependencies);
 
-public sealed class ServiceTopologyEngine(IStateStore stateStore)
+public sealed class ServiceTopologyEngine(StateCoordinator state)
 {
     public async Task<ServiceRegistrationResult> RegisterAsync(
         string operationId,
@@ -33,14 +33,14 @@ public sealed class ServiceTopologyEngine(IStateStore stateStore)
         CancellationToken cancellationToken = default)
     {
         Validate(projectId, descriptor);
-        var receipt = await stateStore.ReadOperationReceiptAsync(operationId, cancellationToken).ConfigureAwait(false);
+        var receipt = await state.ReadOperationReceiptAsync(operationId, cancellationToken).ConfigureAwait(false);
         if (receipt?.Status == "COMPLETE")
         {
             return new ServiceRegistrationResult("IDEMPOTENT_REPLAY", receipt.Generation ?? 0, descriptor.Contracts.Count, descriptor.Dependencies.Count);
         }
 
         var serviceKey = new StateKey(projectId, EntityKinds.Service, descriptor.ServiceId);
-        var currentService = await stateStore.ReadAsync(serviceKey, cancellationToken).ConfigureAwait(false);
+        var currentService = await state.ReadAsync(serviceKey, cancellationToken).ConfigureAwait(false);
         var mutations = new List<StateMutation>
         {
             Mutation(serviceKey, currentService, goalRevision, descriptor.SourceFingerprint, descriptor)
@@ -48,7 +48,7 @@ public sealed class ServiceTopologyEngine(IStateStore stateStore)
         foreach (var contract in descriptor.Contracts.OrderBy(static item => item.ContractId, StringComparer.Ordinal))
         {
             var key = new StateKey(projectId, EntityKinds.Contract, contract.ContractId);
-            mutations.Add(Mutation(key, await stateStore.ReadAsync(key, cancellationToken).ConfigureAwait(false), goalRevision, contract.Fingerprint, contract));
+            mutations.Add(Mutation(key, await state.ReadAsync(key, cancellationToken).ConfigureAwait(false), goalRevision, contract.Fingerprint, contract));
         }
 
         var edges = new List<DependencyEdge>();
@@ -62,7 +62,7 @@ public sealed class ServiceTopologyEngine(IStateStore stateStore)
                 projectId, EntityKinds.Service, consumer, EntityKinds.Contract, contract.ContractId, "CONSUMES", contract.Fingerprint)));
         }
 
-        var result = await stateStore.CompareAndSwapBatchAsync(new BatchTransactionRequest(
+        var result = await state.CommitBatchAsync(new BatchTransactionRequest(
             operationId,
             mutations,
             "SERVICE_TOPOLOGY_CHANGED",
@@ -74,7 +74,7 @@ public sealed class ServiceTopologyEngine(IStateStore stateStore)
 
     public async Task<IReadOnlyList<ServiceDescriptor>> ActiveServicesAsync(string projectId, CancellationToken cancellationToken = default)
     {
-        var states = await stateStore.ReadAsync(projectId, EntityKinds.Service, StateLifecycle.Valid, 1000, cancellationToken).ConfigureAwait(false);
+        var states = await state.ReadAsync(projectId, EntityKinds.Service, StateLifecycle.Valid, 1000, cancellationToken).ConfigureAwait(false);
         return states.Select(state => System.Text.Json.JsonSerializer.Deserialize<ServiceDescriptor>(state.PayloadJson)
             ?? throw new InvalidDataException($"Invalid service descriptor {state.Key.EntityId}"))
             .ToArray();

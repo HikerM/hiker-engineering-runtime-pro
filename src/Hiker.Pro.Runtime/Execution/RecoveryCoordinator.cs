@@ -6,7 +6,7 @@ using Hiker.Pro.Workspace;
 namespace Hiker.Pro.Execution;
 
 public sealed class RecoveryCoordinator(
-    IStateStore stateStore,
+    StateCoordinator coordinator,
     IWorkspaceInspector workspaceInspector,
     ProcessIdentityProbe processProbe,
     TimeProvider? timeProvider = null)
@@ -17,14 +17,14 @@ public sealed class RecoveryCoordinator(
     {
         Validate(plan);
         var activateOperation = $"{plan.OperationId}:activate";
-        var complete = await stateStore.ReadOperationReceiptAsync(activateOperation, cancellationToken).ConfigureAwait(false);
+        var complete = await coordinator.ReadOperationReceiptAsync(activateOperation, cancellationToken).ConfigureAwait(false);
         if (complete?.Status == "COMPLETE")
         {
             return new TaskRecoveryResult("IDEMPOTENT_REPLAY", null, complete.Generation ?? 0, "ALREADY_RECOVERED");
         }
 
         var reserveOperation = $"{plan.OperationId}:reserve";
-        var reserved = await stateStore.ReadOperationReceiptAsync(reserveOperation, cancellationToken).ConfigureAwait(false);
+        var reserved = await coordinator.ReadOperationReceiptAsync(reserveOperation, cancellationToken).ConfigureAwait(false);
         if (reserved?.Status == "COMPLETE")
         {
             return new TaskRecoveryResult("RECOVERY_REQUIRED", null, reserved.Generation ?? 0, "RESERVATION_ALREADY_COMMITTED");
@@ -91,7 +91,7 @@ public sealed class RecoveryCoordinator(
             Status = "RESERVED",
             Epoch = lease.Epoch + 1
         };
-        var reserve = await stateStore.CompareAndSwapBatchAsync(new BatchTransactionRequest(
+        var reserve = await coordinator.CommitBatchAsync(new BatchTransactionRequest(
             reserveOperation,
             new[]
             {
@@ -136,7 +136,7 @@ public sealed class RecoveryCoordinator(
         var afterReserve = await ReadAsync(plan, cancellationToken).ConfigureAwait(false);
         var reservedLease = RuntimeStateCodec.Parse<RuntimeLease>(afterReserve.Lease!);
         var activeAt = _clock.GetUtcNow();
-        var activate = await stateStore.CompareAndSwapBatchAsync(new BatchTransactionRequest(
+        var activate = await coordinator.CommitBatchAsync(new BatchTransactionRequest(
             activateOperation,
             new[]
             {
@@ -168,12 +168,12 @@ public sealed class RecoveryCoordinator(
         var state = RecoveryStates.Keys(plan.ProjectId, plan.TaskId, plan.RecoveryRuntimeId, plan.WorktreeId, plan.Checkpoint.CheckpointId);
         return state with
         {
-            Task = await stateStore.ReadAsync(state.TaskKey, cancellationToken).ConfigureAwait(false),
-            Lease = await stateStore.ReadAsync(state.LeaseKey, cancellationToken).ConfigureAwait(false),
-            Ownership = await stateStore.ReadAsync(state.OwnershipKey, cancellationToken).ConfigureAwait(false),
-            RecoveryAgent = await stateStore.ReadAsync(state.RecoveryAgentKey, cancellationToken).ConfigureAwait(false),
-            Checkpoint = await stateStore.ReadAsync(state.CheckpointKey, cancellationToken).ConfigureAwait(false),
-            Worktree = await stateStore.ReadAsync(state.WorktreeKey, cancellationToken).ConfigureAwait(false)
+            Task = await coordinator.ReadAsync(state.TaskKey, cancellationToken).ConfigureAwait(false),
+            Lease = await coordinator.ReadAsync(state.LeaseKey, cancellationToken).ConfigureAwait(false),
+            Ownership = await coordinator.ReadAsync(state.OwnershipKey, cancellationToken).ConfigureAwait(false),
+            RecoveryAgent = await coordinator.ReadAsync(state.RecoveryAgentKey, cancellationToken).ConfigureAwait(false),
+            Checkpoint = await coordinator.ReadAsync(state.CheckpointKey, cancellationToken).ConfigureAwait(false),
+            Worktree = await coordinator.ReadAsync(state.WorktreeKey, cancellationToken).ConfigureAwait(false)
         };
     }
 

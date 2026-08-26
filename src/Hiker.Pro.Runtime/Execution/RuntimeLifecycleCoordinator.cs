@@ -2,7 +2,7 @@ using Hiker.Pro.State;
 
 namespace Hiker.Pro.Execution;
 
-public sealed class RuntimeLifecycleCoordinator(IStateStore stateStore, TimeProvider? timeProvider = null)
+public sealed class RuntimeLifecycleCoordinator(StateCoordinator coordinator, TimeProvider? timeProvider = null)
 {
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
@@ -10,14 +10,14 @@ public sealed class RuntimeLifecycleCoordinator(IStateStore stateStore, TimeProv
     {
         Validate(request);
         var finalOperation = $"{request.OperationId}:release";
-        var receipt = await stateStore.ReadOperationReceiptAsync(finalOperation, cancellationToken).ConfigureAwait(false);
+        var receipt = await coordinator.ReadOperationReceiptAsync(finalOperation, cancellationToken).ConfigureAwait(false);
         if (receipt?.Status == "COMPLETE")
         {
             return new RuntimeCompletionResult("IDEMPOTENT_REPLAY", receipt.Generation ?? 0, null, Array.Empty<string>(), Array.Empty<RuntimeCollectedEvent>());
         }
 
         var prepareOperation = $"{request.OperationId}:drain";
-        var preparedReceipt = await stateStore.ReadOperationReceiptAsync(prepareOperation, cancellationToken).ConfigureAwait(false);
+        var preparedReceipt = await coordinator.ReadOperationReceiptAsync(prepareOperation, cancellationToken).ConfigureAwait(false);
         if (preparedReceipt?.Status == "COMPLETE")
         {
             return new RuntimeCompletionResult("RECOVERY_REQUIRED", preparedReceipt.Generation ?? 0, null, Array.Empty<string>(), Array.Empty<RuntimeCollectedEvent>());
@@ -33,7 +33,7 @@ public sealed class RuntimeLifecycleCoordinator(IStateStore stateStore, TimeProv
         var task = RuntimeStateCodec.Parse<RuntimeTaskState>(state.Task!);
         var agent = RuntimeStateCodec.Parse<RuntimeAgentState>(state.Agent!);
         var worktree = RuntimeStateCodec.Parse<RuntimeWorktreeState>(state.Worktree!);
-        var drain = await stateStore.CompareAndSwapBatchAsync(new BatchTransactionRequest(
+        var drain = await coordinator.CommitBatchAsync(new BatchTransactionRequest(
             prepareOperation,
             new[]
             {
@@ -84,7 +84,7 @@ public sealed class RuntimeLifecycleCoordinator(IStateStore stateStore, TimeProv
             RuntimeLifecycle.Interrupted => "TASK_INTERRUPTED",
             _ => throw new InvalidOperationException("Unsupported terminal outcome")
         };
-        var release = await stateStore.CompareAndSwapBatchAsync(new BatchTransactionRequest(
+        var release = await coordinator.CommitBatchAsync(new BatchTransactionRequest(
             finalOperation,
             new[]
             {
@@ -111,11 +111,11 @@ public sealed class RuntimeLifecycleCoordinator(IStateStore stateStore, TimeProv
         var state = CompletionState.Keys(request.ProjectId, request.TaskId, request.Handle.RuntimeId, request.WorktreeId);
         return state with
         {
-            Task = await stateStore.ReadAsync(state.TaskKey, cancellationToken).ConfigureAwait(false),
-            Agent = await stateStore.ReadAsync(state.AgentKey, cancellationToken).ConfigureAwait(false),
-            Lease = await stateStore.ReadAsync(state.LeaseKey, cancellationToken).ConfigureAwait(false),
-            Ownership = await stateStore.ReadAsync(state.OwnershipKey, cancellationToken).ConfigureAwait(false),
-            Worktree = await stateStore.ReadAsync(state.WorktreeKey, cancellationToken).ConfigureAwait(false)
+            Task = await coordinator.ReadAsync(state.TaskKey, cancellationToken).ConfigureAwait(false),
+            Agent = await coordinator.ReadAsync(state.AgentKey, cancellationToken).ConfigureAwait(false),
+            Lease = await coordinator.ReadAsync(state.LeaseKey, cancellationToken).ConfigureAwait(false),
+            Ownership = await coordinator.ReadAsync(state.OwnershipKey, cancellationToken).ConfigureAwait(false),
+            Worktree = await coordinator.ReadAsync(state.WorktreeKey, cancellationToken).ConfigureAwait(false)
         };
     }
 

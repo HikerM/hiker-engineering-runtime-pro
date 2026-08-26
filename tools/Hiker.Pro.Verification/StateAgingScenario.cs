@@ -23,15 +23,16 @@ internal sealed class StateAgingScenario
         {
             await using var store = new SqliteStateStore(layout);
             await store.InitializeAsync().ConfigureAwait(false);
+            var state = new StateCoordinator(store);
             await SeedTopologyAsync(store).ConfigureAwait(false);
             var resolver = new ContextResolver(store);
             var resume = new ProjectResumeService(store);
-            var graph = new ImpactGraphEngine(store);
+            var graph = new ImpactGraphEngine(state);
             var monthOne = new HotPathMetrics();
             var monthTwelve = new HotPathMetrics();
             for (var month = 1; month <= 12; month++)
             {
-                await SimulateMonthAsync(store, layout, month).ConfigureAwait(false);
+                await SimulateMonthAsync(store, state, layout, month).ConfigureAwait(false);
                 if (month is 1 or 12)
                 {
                     var measurement = await MeasureHotPathsAsync(store, resolver, resume, graph).ConfigureAwait(false);
@@ -159,7 +160,7 @@ internal sealed class StateAgingScenario
         }
     }
 
-    private static async Task SimulateMonthAsync(IStateStore store, ProjectLayout layout, int month)
+    private static async Task SimulateMonthAsync(IStateStore store, StateCoordinator state, ProjectLayout layout, int month)
     {
         var tasks = Enumerable.Range(0, 100).Select(index => State(
             EntityKinds.Task,
@@ -213,7 +214,7 @@ internal sealed class StateAgingScenario
             await store.AppendEventAsync(Event($"engineering-{month:D2}-{index:D3}", "ENGINEERING_FACT", "BOUNDED_SEMANTIC_EVENT")).ConfigureAwait(false);
         }
 
-        var artifactStore = new ContentAddressedArtifactStore(layout, store);
+        var artifactStore = new ContentAddressedArtifactStore(layout, state);
         for (var index = 0; index < 10; index++)
         {
             var content = Encoding.UTF8.GetBytes($"month={month};evidence={index};fixture=accelerated-aging");

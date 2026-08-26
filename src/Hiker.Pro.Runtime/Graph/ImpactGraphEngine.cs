@@ -32,7 +32,7 @@ public sealed record ImpactAnalysisResult(
     bool Truncated,
     string Status);
 
-public sealed class ImpactGraphEngine(IStateStore stateStore)
+public sealed class ImpactGraphEngine(StateCoordinator state)
 {
     private static readonly HashSet<string> StrongRelations = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -91,7 +91,7 @@ public sealed class ImpactGraphEngine(IStateStore stateStore)
                 continue;
             }
 
-            var incoming = await stateStore.QueryDependenciesAsync(
+            var incoming = await state.QueryDependenciesAsync(
                 request.ProjectId,
                 current.Key.Kind,
                 current.Key.EntityId,
@@ -133,7 +133,7 @@ public sealed class ImpactGraphEngine(IStateStore stateStore)
             throw new InvalidOperationException("Impact analysis found no affected evidence");
         }
 
-        return await stateStore.InvalidateAsync(new InvalidationRequest(
+        return await state.InvalidateAsync(new InvalidationRequest(
             operationId,
             request.ProjectId,
             analysis.EvidenceToInvalidate,

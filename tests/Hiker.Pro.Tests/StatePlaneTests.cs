@@ -153,7 +153,7 @@ public sealed class StatePlaneTests
         await File.WriteAllTextAsync(Path.Combine(tasks, "TASK-001.json"), "{\"task_id\":\"TASK-001\",\"goal_revision\":3,\"status\":\"Development\"}");
         await File.WriteAllTextAsync(Path.Combine(project.Layout.AiRoot, "not-imported.json"), "{\"prompt\":\"must stay outside state\"}");
 
-        var importer = new Community518Importer(project.Layout, project.Store);
+        var importer = new Community518Importer(project.Layout, project.Coordinator);
         var first = await importer.ImportAsync("project-legacy");
         var retry = await importer.ImportAsync("project-legacy");
         Assert.Equal("IMPORTED", first.Status);
@@ -262,7 +262,7 @@ public sealed class StatePlaneTests
     public async Task ArtifactStore_DeduplicatesAndDetectsCorruption()
     {
         await using var project = await TestProject.CreateAsync();
-        var artifacts = new ContentAddressedArtifactStore(project.Layout, project.Store);
+        var artifacts = new ContentAddressedArtifactStore(project.Layout, project.Coordinator);
         var first = await artifacts.PutAsync(Put("same content"));
         var second = await artifacts.PutAsync(Put("same content"));
         Assert.Equal(first.Sha256, second.Sha256);
@@ -278,7 +278,7 @@ public sealed class StatePlaneTests
     public async Task Doctor_BlocksBrokenArtifactReferenceWithoutDeletingUserState()
     {
         await using var project = await TestProject.CreateAsync();
-        var artifacts = new ContentAddressedArtifactStore(project.Layout, project.Store);
+        var artifacts = new ContentAddressedArtifactStore(project.Layout, project.Coordinator);
         var record = await artifacts.PutAsync(Put("evidence"));
         File.Delete(Path.Combine(project.Layout.AiRoot, record.RelativeRef.Replace('/', Path.DirectorySeparatorChar)));
         var health = await project.Store.HealthCheckAsync();

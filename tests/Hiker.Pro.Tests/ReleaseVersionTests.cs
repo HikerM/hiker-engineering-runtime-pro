@@ -25,6 +25,34 @@ public sealed class ReleaseVersionTests
         Assert.Equal(facts.StateSchema, await command.ExecuteScalarAsync());
     }
 
+    [Fact]
+    public void ProductionDomainWrites_AreRoutedThroughStateCoordinator()
+    {
+        var runtime = Path.Combine(FindRepositoryRoot(), "src", "Hiker.Pro.Runtime");
+        var stateDirectory = Path.Combine(runtime, "State") + Path.DirectorySeparatorChar;
+        var directWritePrimitives = new[]
+        {
+            ".CompareAndSwapAsync(",
+            ".CompareAndSwapBatchAsync(",
+            ".AppendEventAsync(",
+            ".InvalidateAsync(",
+            ".MaterializeAsync(",
+            ".MigrateAsync(",
+            ".RepairAsync(",
+            ".GarbageCollectAsync(",
+            ".RegisterArtifactAsync("
+        };
+        var bypasses = Directory.EnumerateFiles(runtime, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.StartsWith(stateDirectory, StringComparison.OrdinalIgnoreCase))
+            .Select(path => new { Path = path, Content = File.ReadAllText(path) })
+            .Where(item => item.Content.Contains("IStateStore", StringComparison.Ordinal) &&
+                           directWritePrimitives.Any(item.Content.Contains))
+            .Select(item => Path.GetRelativePath(runtime, item.Path))
+            .ToArray();
+
+        Assert.Empty(bypasses);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

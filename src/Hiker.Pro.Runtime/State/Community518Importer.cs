@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace Hiker.Pro.State;
 
-public sealed class Community518Importer(ProjectLayout layout, IStateStore store)
+public sealed class Community518Importer(ProjectLayout layout, StateCoordinator state)
 {
     private const int MaxFiles = 100_000;
     private static readonly IReadOnlyDictionary<string, string> ExactFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -32,7 +32,7 @@ public sealed class Community518Importer(ProjectLayout layout, IStateStore store
     {
         var normalizedProject = new StateKey(projectId, EntityKinds.Project, "project").Normalize().ProjectId;
         var markerKey = new StateKey(normalizedProject, EntityKinds.Migration, "community-5.18");
-        var marker = await store.ReadAsync(markerKey, cancellationToken).ConfigureAwait(false);
+        var marker = await state.ReadAsync(markerKey, cancellationToken).ConfigureAwait(false);
         if (marker is not null)
         {
             using var markerDocument = JsonDocument.Parse(marker.PayloadJson);
@@ -88,7 +88,16 @@ public sealed class Community518Importer(ProjectLayout layout, IStateStore store
                 "COMMUNITY_STATE_IMPORTED",
                 "COMMUNITY_5_18_IMPORT",
                 JsonSerializer.Serialize(new { source_ref = $".ai/{relative}" }));
-            var result = await store.CompareAndSwapAsync(request, cancellationToken).ConfigureAwait(false);
+            var snapshot = await state.ReadForReasoningAsync(key, cancellationToken).ConfigureAwait(false);
+            var result = await state.CommitAsync(
+                snapshot,
+                request.OperationId,
+                request.Mutation,
+                request.EventType,
+                request.SummaryCode,
+                request.EventPayloadJson,
+                request.DependencyChanges,
+                cancellationToken).ConfigureAwait(false);
             if (!result.Committed)
             {
                 rejected.Add($"{relative}:{result.Status}");
@@ -119,12 +128,15 @@ public sealed class Community518Importer(ProjectLayout layout, IStateStore store
             authority = "SQLITE_STATE_PLANE",
             legacy_files = "READ_ONLY_SOURCE"
         });
-        var markerResult = await store.CompareAndSwapAsync(new TransactionRequest(
+        var markerSnapshot = await state.ReadForReasoningAsync(markerKey, cancellationToken).ConfigureAwait(false);
+        var markerResult = await state.CommitAsync(
+            markerSnapshot,
             $"community-5.18-complete-{aggregate[..24]}",
             new StateMutation(markerKey, 0, 0, StateLifecycle.Valid, "STATE_COORDINATOR", SqliteSchema.CurrentVersion, aggregate, aggregate, markerPayload),
             "COMMUNITY_IMPORT_COMPLETED",
             "COMMUNITY_5_18_IMPORT_COMPLETE",
-            "{}"), cancellationToken).ConfigureAwait(false);
+            "{}",
+            cancellationToken: cancellationToken).ConfigureAwait(false);
         if (!markerResult.Committed)
         {
             return new CommunityImportReport("REQUIRES_REVIEW", normalizedProject, sources.Count, imported, replayed, aggregate, new[] { $"marker:{markerResult.Status}" });

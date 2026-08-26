@@ -33,7 +33,7 @@ public sealed record EngineeringResourceLease(
 public sealed record ResourceLeaseResult(string Status, EngineeringResourceLease Lease, long Generation);
 
 public sealed class ResourceLeaseCoordinator(
-    IStateStore stateStore,
+    StateCoordinator state,
     ProcessIdentityProbe processProbe,
     TimeProvider? timeProvider = null)
 {
@@ -42,14 +42,14 @@ public sealed class ResourceLeaseCoordinator(
     public async Task<ResourceLeaseResult> AcquireAsync(ResourceLeaseRequest request, CancellationToken cancellationToken = default)
     {
         Validate(request);
-        var receipt = await stateStore.ReadOperationReceiptAsync(request.OperationId, cancellationToken).ConfigureAwait(false);
+        var receipt = await state.ReadOperationReceiptAsync(request.OperationId, cancellationToken).ConfigureAwait(false);
         if (receipt?.Status == "COMPLETE" && receipt.ResultJson is not null)
         {
             using var result = JsonDocument.Parse(receipt.ResultJson);
             var token = result.RootElement.GetProperty("token").GetString()!;
-            var state = await stateStore.ReadAsync(Key(request.ProjectId, request.Kind, token), cancellationToken).ConfigureAwait(false)
+            var storedState = await state.ReadAsync(Key(request.ProjectId, request.Kind, token), cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidDataException("Completed resource operation has no lease state");
-            return new ResourceLeaseResult("IDEMPOTENT_REPLAY", Parse(state), receipt.Generation ?? state.Generation);
+            return new ResourceLeaseResult("IDEMPOTENT_REPLAY", Parse(storedState), receipt.Generation ?? storedState.Generation);
         }
 
         foreach (var token in CandidateTokens(request))
@@ -61,7 +61,7 @@ public sealed class ResourceLeaseCoordinator(
             }
 
             var key = Key(request.ProjectId, request.Kind, token);
-            var current = await stateStore.ReadAsync(key, cancellationToken).ConfigureAwait(false);
+            var current = await state.ReadAsync(key, cancellationToken).ConfigureAwait(false);
             if (current is not null && current.Lifecycle == StateLifecycle.Valid)
             {
                 var existing = Parse(current);
@@ -100,7 +100,7 @@ public sealed class ResourceLeaseCoordinator(
                 request.SourceFingerprint,
                 JsonSerializer.Serialize(lease),
                 RetentionTier.Hot);
-            var commit = await stateStore.CompareAndSwapBatchAsync(new BatchTransactionRequest(
+            var commit = await state.CommitBatchAsync(new BatchTransactionRequest(
                 request.OperationId,
                 new[] { mutation },
                 "RESOURCE_LEASE_ACQUIRED",
@@ -128,14 +128,14 @@ public sealed class ResourceLeaseCoordinator(
         string sourceFingerprint,
         CancellationToken cancellationToken = default)
     {
-        var receipt = await stateStore.ReadOperationReceiptAsync(operationId, cancellationToken).ConfigureAwait(false);
+        var receipt = await state.ReadOperationReceiptAsync(operationId, cancellationToken).ConfigureAwait(false);
         if (receipt?.Status == "COMPLETE")
         {
             return new BatchTransactionResult(true, false, receipt.Generation ?? expectedGeneration, Array.Empty<StateSnapshot>(), "IDEMPOTENT_REPLAY");
         }
 
         var key = Key(lease.ProjectId, lease.Kind, lease.Token);
-        var current = await stateStore.ReadAsync(key, cancellationToken).ConfigureAwait(false)
+        var current = await state.ReadAsync(key, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Resource lease is missing");
         var stored = Parse(current);
         if (stored.TaskId != lease.TaskId || stored.RuntimeId != lease.RuntimeId)
@@ -143,7 +143,7 @@ public sealed class ResourceLeaseCoordinator(
             throw new InvalidOperationException("Resource release is not owned by this runtime");
         }
 
-        return await stateStore.CompareAndSwapBatchAsync(new BatchTransactionRequest(
+        return await state.CommitBatchAsync(new BatchTransactionRequest(
             operationId,
             new[]
             {

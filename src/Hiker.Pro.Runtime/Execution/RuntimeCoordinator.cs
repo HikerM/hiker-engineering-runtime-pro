@@ -6,7 +6,7 @@ using Hiker.Pro.Workspace;
 namespace Hiker.Pro.Execution;
 
 public sealed class RuntimeCoordinator(
-    IStateStore stateStore,
+    StateCoordinator coordinator,
     IWorkspaceInspector workspaceInspector,
     ProcessIdentityProbe processProbe,
     TimeProvider? timeProvider = null)
@@ -126,7 +126,7 @@ public sealed class RuntimeCoordinator(
         CancellationToken cancellationToken = default)
     {
         var leaseKey = new StateKey(projectId, EntityKinds.RuntimeLease, taskId);
-        var leaseState = await stateStore.ReadAsync(leaseKey, cancellationToken).ConfigureAwait(false)
+        var leaseState = await coordinator.ReadAsync(leaseKey, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Runtime lease does not exist");
         var lease = RuntimeStateCodec.Parse<RuntimeLease>(leaseState);
         if (!string.Equals(lease.RuntimeId, runtimeId, StringComparison.Ordinal) || lease.Status != "ACTIVE")
@@ -140,7 +140,7 @@ public sealed class RuntimeCoordinator(
         }
 
         var updated = lease with { HeartbeatAt = heartbeatAt, ExpiresAt = heartbeatAt.AddMinutes(2) };
-        return await stateStore.CompareAndSwapBatchAsync(new BatchTransactionRequest(
+        return await coordinator.CommitBatchAsync(new BatchTransactionRequest(
             operationId,
             new[] { RuntimeStateCodec.Mutation(leaseKey, leaseState, 0, StateLifecycle.Valid, sourceFingerprint, updated) with { ExpectedGeneration = expectedLeaseGeneration } },
             "LEASE_HEARTBEAT",
@@ -190,7 +190,7 @@ public sealed class RuntimeCoordinator(
             NormalizeScopes(request.PredictedAffectedScopes),
             "ACTIVE",
             now);
-        return await stateStore.CompareAndSwapBatchAsync(new BatchTransactionRequest(
+        return await coordinator.CommitBatchAsync(new BatchTransactionRequest(
             operationId,
             new[]
             {
@@ -207,11 +207,11 @@ public sealed class RuntimeCoordinator(
 
     private async Task<RuntimeStateSet> ReadAsync(RuntimeStateSet keys, CancellationToken cancellationToken) => keys with
     {
-        Task = await stateStore.ReadAsync(keys.TaskKey, cancellationToken).ConfigureAwait(false),
-        Agent = await stateStore.ReadAsync(keys.AgentKey, cancellationToken).ConfigureAwait(false),
-        Lease = await stateStore.ReadAsync(keys.LeaseKey, cancellationToken).ConfigureAwait(false),
-        Ownership = await stateStore.ReadAsync(keys.OwnershipKey, cancellationToken).ConfigureAwait(false),
-        Worktree = await stateStore.ReadAsync(keys.WorktreeKey, cancellationToken).ConfigureAwait(false)
+        Task = await coordinator.ReadAsync(keys.TaskKey, cancellationToken).ConfigureAwait(false),
+        Agent = await coordinator.ReadAsync(keys.AgentKey, cancellationToken).ConfigureAwait(false),
+        Lease = await coordinator.ReadAsync(keys.LeaseKey, cancellationToken).ConfigureAwait(false),
+        Ownership = await coordinator.ReadAsync(keys.OwnershipKey, cancellationToken).ConfigureAwait(false),
+        Worktree = await coordinator.ReadAsync(keys.WorktreeKey, cancellationToken).ConfigureAwait(false)
     };
 
     private static RuntimeStateSet RuntimeKeys(string projectId, string taskId, string runtimeId, string worktreeId) => new(
@@ -247,7 +247,7 @@ public sealed class RuntimeCoordinator(
     private async Task ValidateWorktreeConflictsAsync(RuntimeStartRequest request, WorkspaceSnapshot workspace, CancellationToken cancellationToken)
     {
         var requestedScopes = NormalizeScopes(request.PredictedAffectedScopes);
-        var worktrees = await stateStore.ReadAsync(request.ProjectId, EntityKinds.Worktree, StateLifecycle.Valid, 1000, cancellationToken).ConfigureAwait(false);
+        var worktrees = await coordinator.ReadAsync(request.ProjectId, EntityKinds.Worktree, StateLifecycle.Valid, 1000, cancellationToken).ConfigureAwait(false);
         foreach (var state in worktrees)
         {
             var active = RuntimeStateCodec.Parse<RuntimeWorktreeState>(state);

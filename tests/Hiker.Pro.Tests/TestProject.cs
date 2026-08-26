@@ -9,11 +9,13 @@ internal sealed class TestProject : IAsyncDisposable
         Root = root;
         Layout = new ProjectLayout(root);
         Store = store;
+        Coordinator = new StateCoordinator(store);
     }
 
     public string Root { get; }
     public ProjectLayout Layout { get; }
     public SqliteStateStore Store { get; }
+    public StateCoordinator Coordinator { get; }
 
     public static async Task<TestProject> CreateAsync()
     {

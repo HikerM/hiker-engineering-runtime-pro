@@ -29,6 +29,7 @@ if (args[0] == "version")
 var root = ValueAfter(args, "--root") ?? Directory.GetCurrentDirectory();
 var layout = new ProjectLayout(root);
 await using var store = new SqliteStateStore(layout);
+var state = new StateCoordinator(store);
 
 try
 {
@@ -103,7 +104,7 @@ try
             await store.InitializeAsync().ConfigureAwait(false);
             var projectId = ValueAfter(args, "--project-id") ?? throw new ArgumentException("migrate-community requires --project-id <stable id>");
             var migrationBackup = await new StateBackupService(layout).CreateAsync().ConfigureAwait(false);
-            var import = await new Community518Importer(layout, store).ImportAsync(projectId).ConfigureAwait(false);
+            var import = await new Community518Importer(layout, state).ImportAsync(projectId).ConfigureAwait(false);
             Console.WriteLine(JsonSerializer.Serialize(new { import, pre_import_backup = migrationBackup }, options));
             return import.Status is "IMPORTED" or "ALREADY_IMPORTED" ? 0 : 2;
         default:

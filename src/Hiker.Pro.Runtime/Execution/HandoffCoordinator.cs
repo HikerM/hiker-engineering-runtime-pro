@@ -7,7 +7,7 @@ using Hiker.Pro.Workspace;
 namespace Hiker.Pro.Execution;
 
 public sealed class HandoffCoordinator(
-    IStateStore stateStore,
+    StateCoordinator coordinator,
     ContentAddressedArtifactStore artifactStore,
     IWorkspaceInspector workspaceInspector,
     TimeProvider? timeProvider = null)
@@ -18,14 +18,14 @@ public sealed class HandoffCoordinator(
     {
         Validate(request);
         var finalOperationId = $"{request.OperationId}:activate";
-        var finalReceipt = await stateStore.ReadOperationReceiptAsync(finalOperationId, cancellationToken).ConfigureAwait(false);
+        var finalReceipt = await coordinator.ReadOperationReceiptAsync(finalOperationId, cancellationToken).ConfigureAwait(false);
         if (finalReceipt?.Status == "COMPLETE")
         {
             return new HandoffResult("IDEMPOTENT_REPLAY", null, null, null, finalReceipt.Generation ?? 0);
         }
 
         var transferOperationId = $"{request.OperationId}:transfer";
-        var transferReceipt = await stateStore.ReadOperationReceiptAsync(transferOperationId, cancellationToken).ConfigureAwait(false);
+        var transferReceipt = await coordinator.ReadOperationReceiptAsync(transferOperationId, cancellationToken).ConfigureAwait(false);
         if (transferReceipt?.Status == "COMPLETE")
         {
             return new HandoffResult("RECOVERY_REQUIRED", null, null, null, transferReceipt.Generation ?? 0);
@@ -72,7 +72,7 @@ public sealed class HandoffCoordinator(
         }
 
         var now = _clock.GetUtcNow();
-        var transfer = await stateStore.CompareAndSwapBatchAsync(new BatchTransactionRequest(
+        var transfer = await coordinator.CommitBatchAsync(new BatchTransactionRequest(
             transferOperationId,
             TransferMutations(request, currentStates, workspace, checkpoint, paused, target, now),
             "AGENT_HANDOFF",
@@ -113,7 +113,7 @@ public sealed class HandoffCoordinator(
         }
 
         var transferredStates = await ReadStatesAsync(request.ProjectId, request.TaskId, request.CurrentHandle.RuntimeId, request.TargetRuntimeId, request.WorktreeId, cancellationToken).ConfigureAwait(false);
-        var activate = await stateStore.CompareAndSwapBatchAsync(new BatchTransactionRequest(
+        var activate = await coordinator.CommitBatchAsync(new BatchTransactionRequest(
             finalOperationId,
             ActivationMutations(request, transferredStates, workspace, checkpoint, recovered, _clock.GetUtcNow()),
             "TASK_RECOVERED",
@@ -235,12 +235,12 @@ public sealed class HandoffCoordinator(
         var state = HandoffStates.Keys(projectId, taskId, currentRuntimeId, targetRuntimeId, worktreeId);
         return state with
         {
-            Task = await stateStore.ReadAsync(state.TaskKey, cancellationToken).ConfigureAwait(false),
-            CurrentAgent = await stateStore.ReadAsync(state.CurrentAgentKey, cancellationToken).ConfigureAwait(false),
-            TargetAgent = await stateStore.ReadAsync(state.TargetAgentKey, cancellationToken).ConfigureAwait(false),
-            Lease = await stateStore.ReadAsync(state.LeaseKey, cancellationToken).ConfigureAwait(false),
-            Ownership = await stateStore.ReadAsync(state.OwnershipKey, cancellationToken).ConfigureAwait(false),
-            Worktree = await stateStore.ReadAsync(state.WorktreeKey, cancellationToken).ConfigureAwait(false)
+            Task = await coordinator.ReadAsync(state.TaskKey, cancellationToken).ConfigureAwait(false),
+            CurrentAgent = await coordinator.ReadAsync(state.CurrentAgentKey, cancellationToken).ConfigureAwait(false),
+            TargetAgent = await coordinator.ReadAsync(state.TargetAgentKey, cancellationToken).ConfigureAwait(false),
+            Lease = await coordinator.ReadAsync(state.LeaseKey, cancellationToken).ConfigureAwait(false),
+            Ownership = await coordinator.ReadAsync(state.OwnershipKey, cancellationToken).ConfigureAwait(false),
+            Worktree = await coordinator.ReadAsync(state.WorktreeKey, cancellationToken).ConfigureAwait(false)
         };
     }
 

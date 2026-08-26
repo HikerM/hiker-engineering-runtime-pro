@@ -58,7 +58,7 @@ public sealed class FaultInjectionTests
     public async Task FaultDuringArtifactWrite_RemovesTemporaryBytesAndDoesNotRegisterArtifact()
     {
         await using var project = await TestProject.CreateAsync();
-        var store = new ContentAddressedArtifactStore(project.Layout, project.Store);
+        var store = new ContentAddressedArtifactStore(project.Layout, project.Coordinator);
         await Assert.ThrowsAsync<IOException>(() => store.PutAsync(new ArtifactPutRequest(
             "project-1",
             "FAULT_FIXTURE",

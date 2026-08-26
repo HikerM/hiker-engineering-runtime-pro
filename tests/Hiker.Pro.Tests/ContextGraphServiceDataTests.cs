@@ -56,7 +56,7 @@ public sealed class ContextGraphServiceDataTests
         };
         Assert.True((await project.Store.CompareAndSwapBatchAsync(new BatchTransactionRequest(
             "impact-seed", mutations, "GRAPH_CREATED", "GRAPH_CREATED", "{}", edges))).Committed);
-        var engine = new ImpactGraphEngine(project.Store);
+        var engine = new ImpactGraphEngine(project.Coordinator);
         var request = new ImpactAnalysisRequest("project-1", new[]
         {
             new ImpactSeed(new StateKey("project-1", EntityKinds.Contract, "api-v1"), "MODIFIED", "contract-v2")
@@ -74,7 +74,7 @@ public sealed class ContextGraphServiceDataTests
     public async Task ServiceTopology_RegistersPolyglotContractEdgesIdempotently()
     {
         await using var project = await TestProject.CreateAsync();
-        var engine = new ServiceTopologyEngine(project.Store);
+        var engine = new ServiceTopologyEngine(project.Coordinator);
         var descriptor = new ServiceDescriptor(
             "orders-api",
             "dotnet",
@@ -100,7 +100,7 @@ public sealed class ContextGraphServiceDataTests
     public async Task ResourceLease_CasAllocatesDistinctPortsAcrossConcurrentWorkers()
     {
         await using var project = await TestProject.CreateAsync();
-        var coordinator = new ResourceLeaseCoordinator(project.Store, new ProcessIdentityProbe());
+        var coordinator = new ResourceLeaseCoordinator(project.Coordinator, new ProcessIdentityProbe());
         var tasks = Enumerable.Range(0, 8).Select(index => coordinator.AcquireAsync(new ResourceLeaseRequest(
             $"port-op-{index}", "project-1", $"task-{index}", $"runtime-{index}", "PORT", null,
             52000, 52100, null, TimeSpan.FromMinutes(5), $"source-{index}"))).ToArray();
