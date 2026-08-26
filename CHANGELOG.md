@@ -12,6 +12,7 @@
 - 原子 Goal Change：六类修订、四种 Task 影响分类、作用域证据失效、未受影响成果保留与幂等回执。
 - ECDSA P-256 Signed Entitlement、Device Activation、Offline Grace、Signed Module / Update 与签名回滚策略。
 - 加速老化、大型语义仓库、真实进程/端口/HTTP、PostgreSQL、Codex Runtime 和 COMM-G1–G17 验证场景。
+- 1/2/4/8 并发 Fake Runtime Worker 场景，覆盖生产 Task/Agent/Lease/Ownership/Worktree 协调与释放。
 - 商业 RC 工具：外部私钥签名、确定性 Manifest、逐文件 Hash、ZIP Checksum、独立信任根验证、隐私扫描、篡改拒绝和隔离 Clean Install。
 
 ### Security

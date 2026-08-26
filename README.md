@@ -48,7 +48,7 @@ Context Resolver、`hiker resume`、Intent/Dependency/Evidence Graph、结构化
 验证工具已覆盖：
 
 - 12 个月加速老化：1201 Task、120 Goal Revision、120 Handoff、60 Crash；
-- 1/2/4/8 Worker 的真实 SQLite/WAL CAS 竞争；
+- 1/2/4/8 Worker 的真实 SQLite/WAL CAS 竞争，以及基于生产 Runtime Contract 的并发 Fake Adapter 启动/释放；
 - 100k 非空语义文件与真实 Git add/commit/delta；
 - 5 个隔离可执行 HTTP 服务；
 - PostgreSQL 16.14、100k 行 before/after 与 8 客户端并发；
@@ -66,7 +66,7 @@ Context Resolver、`hiker resume`、Intent/Dependency/Evidence Graph、结构化
 | Unit / Integration | 当前源码 64/64 PASS；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
 | Community 5.18 回归 | 五插件合计 297/297 PASS，公开工作区保持干净 | `DETERMINISTIC_VERIFIED` |
 | 加速老化 | 12 个合成月份、1201 Task、120 Goal Revision、120 Handoff、60 Crash | `SIMULATION_PROVEN` |
-| 并发写入 | 1/2/4/8 Worker 均恰好一个 CAS 成功 | `REAL_INTEGRATION_PROVEN` |
+| 并发写入 | 1/2/4/8 Worker 均恰好一个 CAS 成功；Runtime Worker 结果需由当前提交重跑确认 | `SIMULATION_PROVEN` |
 | 大仓库 | 100,000 个非空语义文件；100 文件增量 `git status` 269.969 ms | `SIMULATION_PROVEN` |
 | 服务集成 | 五个真实进程、唯一端口与 HTTP Health | `REAL_INTEGRATION_PROVEN` |
 | PostgreSQL | 16.14、100,000 行；查询 P95 9.528 ms → 0.114 ms；八客户端零错误 | `REAL_INTEGRATION_PROVEN` |

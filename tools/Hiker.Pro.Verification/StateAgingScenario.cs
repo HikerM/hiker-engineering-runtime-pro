@@ -52,6 +52,7 @@ internal sealed class StateAgingScenario
             healthWatch.Stop();
             var metrics = await store.GetMetricsAsync().ConfigureAwait(false);
             var concurrency = await VerifyConcurrentWritersAsync(store).ConfigureAwait(false);
+            var runtimeWorkers = await new RuntimeWorkerSimulation(state, root).RunAsync().ConfigureAwait(false);
             var finalContext = await resolver.ResolveAsync(new ContextRequest(ProjectId, ActiveTaskId, GoalId)).ConfigureAwait(false);
             var aiBytes = Directory.EnumerateFiles(layout.AiRoot, "*", SearchOption.AllDirectories)
                 .Sum(static path => new FileInfo(path).Length);
@@ -114,7 +115,15 @@ internal sealed class StateAgingScenario
                     "Concurrent simulated workers shared the production SQLite/WAL CAS implementation",
                     concurrency.ToDictionary(
                         static pair => $"workers_{pair.Key}",
-                        static pair => (object?)new { pair.Value.Successes, pair.Value.Conflicts, pair.Value.DurationMs }))
+                        static pair => (object?)new { pair.Value.Successes, pair.Value.Conflicts, pair.Value.DurationMs })),
+                new VerificationCheck(
+                    "MULTI-RUNTIME-WORKERS",
+                    runtimeWorkers.All(static pair => pair.Value.Started == pair.Key && pair.Value.Completed == pair.Key && pair.Value.Failures == 0) ? "PASS" : "BLOCKED",
+                    "SIMULATION_PROVEN",
+                    "Concurrent fake runtime adapters exercised production Task/Agent/Lease/Ownership/Worktree coordination and release",
+                    runtimeWorkers.ToDictionary(
+                        static pair => $"workers_{pair.Key}",
+                        static pair => (object?)new { pair.Value.Started, pair.Value.Completed, pair.Value.Failures, pair.Value.DurationMs }))
             };
         }
         finally

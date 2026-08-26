@@ -9,7 +9,7 @@ internal sealed class CommercialReleaseGate
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private static readonly IReadOnlyDictionary<string, string[]> RequiredReports = new Dictionary<string, string[]>(StringComparer.Ordinal)
     {
-        ["state-aging.json"] = new[] { "ACCELERATED-AGING", "HISTORY-HOT-PATH", "MULTI-WORKER-CAS" },
+        ["state-aging.json"] = new[] { "ACCELERATED-AGING", "HISTORY-HOT-PATH", "MULTI-WORKER-CAS", "MULTI-RUNTIME-WORKERS" },
         ["large-repository.json"] = new[] { "LARGE-REPOSITORY" },
         ["real-services.json"] = new[] { "REAL-PROCESS-PORT-HTTP", "REAL-DB" },
         ["commercial.json"] = new[] { "COMM-G1-G2-G16", "COMM-G3", "COMM-G17" },
