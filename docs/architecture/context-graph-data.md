@@ -10,6 +10,8 @@
 
 The graph uses typed `dependency_edges`, not token or keyword matching. An impact seed walks incoming consumer edges with explicit node and depth budgets. Strong relations such as `DEPENDS_ON`, `CONSUMES`, `VALIDATES`, and `PROVEN_BY` propagate affected state. Ambiguous relations become `REQUIRES_REVIEW`. Evidence invalidation is permitted only when traversal completed without truncation.
 
+Goal changes use a separate atomic coordinator. The model supplies a structured classification for every in-scope task: `AFFECTED`, `UNAFFECTED`, `SUPERSEDED`, or `REQUIRES_REVIEW`. Runtime validation rejects duplicate tasks, missing task facts, evidence that is not linked by `PROVEN_BY`, evidence invalidation outside `AFFECTED`, and skipped revisions. One State transaction then records the Goal Revision, updates task bindings, marks affected implementation/evidence stale, preserves unaffected evidence, retains superseded history, and leaves uncertain tasks explicitly awaiting review. `ADD`, `REMOVE`, `MODIFY`, `ARCHITECTURE`, `STACK_MIGRATION`, and `UNDO` all create a new immutable revision; undo never deletes history. Exact operation retries return the committed receipt instead of applying the change twice.
+
 ## Service topology and resource leases
 
 Services register runtime/version/build facts, endpoints, datastores, queues, contracts, consumers, and service dependencies as State entities plus typed graph edges. This is runtime-neutral and can represent .NET, Node, Laravel/PHP, Java, Go, Python, Rust, Unity, Qt, or mixed systems without changing the State schema.

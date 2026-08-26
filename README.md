@@ -39,11 +39,11 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 
 ## 当前实现状态
 
-State Plane 已具备真实 SQLite/WAL、短事务 CAS、operation 幂等、依赖边原子提交、语义事件冲突检测、内容寻址 Artifact、Doctor、保守 GC、可验证备份/恢复，以及 Community 5.18 `.ai` 状态的白名单单向导入。
+State Plane 已具备真实 SQLite/WAL、短事务 CAS、operation 幂等、依赖边原子提交、语义事件冲突检测、内容寻址 Artifact、Doctor、保守 GC、可验证备份/恢复，以及 Community 5.18 `.ai` 状态的白名单单向导入。所有生产状态变化收敛到 `StateCoordinator`，测试会阻断新的平行写入口。
 
-Runtime 已建立 provider-neutral Adapter contract、Task/Agent/Lease/Ownership/Worktree 同代提交、PID+启动时间+可执行身份验证、最小交接包、崩溃恢复、两阶段资源释放、真实 Git Worktree 管理和 Codex CLI Adapter。真实安装的 Codex 已完成 Task、隔离 Worktree、Checkpoint、同 Session Recover 与资源释放 E2E，归类为 `REAL_INTEGRATION_PROVEN`。
+Runtime 已建立 provider-neutral Adapter contract、Task/Agent/Lease/Ownership/Worktree 同代提交、PID+启动时间+可执行身份验证、最小交接包、崩溃恢复、两阶段资源释放、真实 Git Worktree、风险自适应冲突调度、持久化 Merge Queue 和 Codex CLI Adapter。低/中风险最多三个互不重叠 Writer Lane；高/关键风险收敛到一个 Writer，并要求独立 Assurance Lane。Merge Queue 只授权已冻结、已验证且仍基于目标 HEAD 的候选，不静默执行合并。
 
-Context Resolver、`hiker resume`、Intent/Dependency/Evidence Graph、50 服务语义拓扑、资源租约、SQLite 查询计划与并发证据、签名 Entitlement、设备激活、Offline Grace、签名 Module/Update、默认拒绝降级和签名回滚授权均已实现。
+Context Resolver、`hiker resume`、Intent/Dependency/Evidence Graph、结构化 Goal Change、50 服务语义拓扑、资源租约、SQLite 查询计划与并发证据、签名 Entitlement、设备激活、Offline Grace、签名 Module/Update、默认拒绝降级和签名回滚授权均已实现。Goal Change 接受模型给出的 `AFFECTED / UNAFFECTED / SUPERSEDED / REQUIRES_REVIEW` 分类，但只由 Runtime 验证 Task/Evidence 绑定并在一个 CAS 事务内提交 Goal Revision、Task 绑定和必要的证据失效；它不使用关键词替代语义判断。
 
 验证工具已覆盖：
 
@@ -63,7 +63,7 @@ Context Resolver、`hiker resume`、Intent/Dependency/Evidence Graph、50 服务
 
 | 验证面 | 结果 | 证据等级 |
 | --- | --- | --- |
-| Unit / Integration | 50/50 PASS | `DETERMINISTIC_VERIFIED` |
+| Unit / Integration | 当前源码 64/64 PASS；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
 | Community 5.18 回归 | 五插件合计 297/297 PASS，公开工作区保持干净 | `DETERMINISTIC_VERIFIED` |
 | 加速老化 | 12 个合成月份、1201 Task、120 Goal Revision、120 Handoff、60 Crash | `SIMULATION_PROVEN` |
 | 并发写入 | 1/2/4/8 Worker 均恰好一个 CAS 成功 | `REAL_INTEGRATION_PROVEN` |
@@ -111,8 +111,8 @@ dotnet test -c Release
 
 | 路径 | 职责 |
 | --- | --- |
-| `src/Hiker.Pro.State` | SQLite/WAL 权威状态、CAS、事件、Artifact、Backup/Restore/Export |
-| `src/Hiker.Pro.Runtime` | Task、Lease、Worktree、Checkpoint、Recovery、Context、Graph 与商业信任边界 |
+| `src/Hiker.Pro.Runtime/State` | SQLite/WAL 权威状态、CAS、事件、Artifact 元数据、Backup/Restore/Export |
+| `src/Hiker.Pro.Runtime` | State、Task、Lease、Worktree、Checkpoint、Recovery、Context、Graph 与商业信任边界 |
 | `src/Hiker.Pro.Cli` | 面向工程项目的薄 CLI 入口 |
 | `tools/Hiker.Pro.Verification` | 老化、规模、真实服务、Codex Runtime 与 COMM-G1–G17 验证 |
 | `tools/Hiker.Pro.Release` | 版本事实、签名 RC 构建、独立包校验与商业发布 Gate |

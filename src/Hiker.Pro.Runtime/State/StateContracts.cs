@@ -38,6 +38,7 @@ public static class EntityKinds
     public const string Goal = "GOAL";
     public const string GoalRevision = "GOAL_REVISION";
     public const string Task = "TASK";
+    public const string TaskDependency = "TASK_DEPENDENCY";
     public const string Decision = "DECISION";
     public const string Ownership = "OWNERSHIP";
     public const string Worktree = "WORKTREE";
