@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Hiker.Pro.Diagnostics;
 using Hiker.Pro.Execution;
+using Hiker.Pro.Context;
 using Hiker.Pro.State;
 
 var options = new JsonSerializerOptions
@@ -13,7 +14,7 @@ var options = new JsonSerializerOptions
 
 if (args.Length == 0 || args[0] is "help" or "--help" or "-h")
 {
-    Console.WriteLine("hiker <init|doctor|status|version|backup|restore|migrate-community> [--root <project>]");
+    Console.WriteLine("hiker <init|doctor|status|resume|version|backup|restore|migrate-community> [--root <project>]");
     return 0;
 }
 
@@ -69,6 +70,13 @@ try
             await store.InitializeAsync().ConfigureAwait(false);
             var backup = await new StateBackupService(layout).CreateAsync(ValueAfter(args, "--output")).ConfigureAwait(false);
             Console.WriteLine(JsonSerializer.Serialize(backup, options));
+            return 0;
+        case "resume":
+            await store.InitializeAsync().ConfigureAwait(false);
+            var resumeProject = ValueAfter(args, "--project-id") ?? throw new ArgumentException("resume requires --project-id <stable id>");
+            var resumeGoal = ValueAfter(args, "--goal-id") ?? throw new ArgumentException("resume requires --goal-id <current goal id>");
+            var resume = await new ProjectResumeService(store).ResumeAsync(resumeProject, resumeGoal).ConfigureAwait(false);
+            Console.WriteLine(JsonSerializer.Serialize(resume, options));
             return 0;
         case "restore":
             await store.InitializeAsync().ConfigureAwait(false);

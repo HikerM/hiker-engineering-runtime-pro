@@ -31,6 +31,7 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 - [5.19 Architecture](docs/architecture/5.19-architecture.md)
 - [Project State Plane](docs/architecture/state-plane.md)
 - [Autonomous Runtime and Writer Safety](docs/architecture/autonomous-runtime.md)
+- [Context, Graph, Services, and Data Performance](docs/architecture/context-graph-data.md)
 
 ## 已实现的首个垂直切片
 
