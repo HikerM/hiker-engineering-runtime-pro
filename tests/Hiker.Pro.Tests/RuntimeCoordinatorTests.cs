@@ -267,6 +267,26 @@ public sealed class RuntimeCoordinatorTests
         Assert.Contains(health.Findings, static finding => finding.Code == "EXPIRED_LIVE_OWNER");
     }
 
+    [Fact]
+    public async Task CodexCliAdapter_UsesRealInstalledCliAndStartsSuspendedWithoutModelCall()
+    {
+        await using var project = await TestProject.CreateAsync();
+        var inputDirectory = Path.Combine(project.Layout.AiRoot, "runtime-input");
+        Directory.CreateDirectory(inputDirectory);
+        await File.WriteAllTextAsync(Path.Combine(inputDirectory, "instruction.txt"), "Return a bounded integration marker.");
+        await using var adapter = new CodexCliRuntimeAdapter();
+        var probe = await adapter.ProbeAsync();
+        Assert.True(probe.Available);
+        Assert.StartsWith("codex-cli ", probe.Version, StringComparison.Ordinal);
+        var handle = await adapter.StartAsync(new RuntimeStartRequest(
+            "project-1", "task-codex", "runtime-codex", project.Root,
+            "runtime-input/instruction.txt", "runtime-input/instruction.txt", 1, "source-codex",
+            WorktreeId: "worktree-codex", PredictedAffectedScopes: new[] { "src/codex" }));
+        Assert.Equal(RuntimeLifecycle.Starting, handle.Lifecycle);
+        Assert.Equal(RuntimeLifecycle.Starting, (await adapter.StatusAsync(handle)).Lifecycle);
+        await adapter.ShutdownAsync(handle);
+    }
+
     private static RuntimeStartRequest Start(
         string root,
         string runtimeId,
