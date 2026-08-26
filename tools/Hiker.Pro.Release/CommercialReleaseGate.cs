@@ -7,6 +7,23 @@ namespace Hiker.Pro.ReleaseTool;
 internal sealed class CommercialReleaseGate
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private static readonly string[] RequiredTestEvidence =
+    {
+        "FaultBeforeEventInsert_RollsBackDomainAndJournalThenAllowsSafeRetry",
+        "BatchCompareAndSwap_RejectsWholeBatchWhenOneMemberIsStale",
+        "OperationRetry_IsIdempotentAndPayloadConflictIsRejected",
+        "PartialImpactPreservesUnaffectedFactsAndInvalidatesOnlyBoundEvidence",
+        "ApiContractChangeInvalidatesConsumerEvidenceButNotDatabaseEvidence",
+        "Start_RejectsSecondWriterWhileLeaseIsActiveWithoutStartingAdapter",
+        "Recovery_UsesValidatedCheckpointAndDoesNotReplayCompletedRecovery",
+        "Completion_DrainsThenReleasesLeaseOwnershipAndWorktreeExactlyOnce",
+        "Scheduler_AdmitsDisjointWorkDefersConflictsAndRequiresIndependentAssurance",
+        "MergeQueue_RequiresAssuranceSerializesAuthorizationAndObservesRealGitMerge",
+        "ProductionDomainWrites_AreRoutedThroughStateCoordinator",
+        "ContextResolver_CostDependsOnTaskEdgesNotColdHistorySize",
+        "SqlitePerformance_UsesRealQueryPlansConcurrencyAndNPlusOneEvidence",
+        "SensitiveContentPolicy_DetectsDirectAndEscapedHomesWithoutFlaggingProductIdentifiers"
+    };
     private static readonly IReadOnlyDictionary<string, string[]> RequiredReports = new Dictionary<string, string[]>(StringComparer.Ordinal)
     {
         ["state-aging.json"] = new[] { "ACCELERATED-AGING", "HISTORY-HOT-PATH", "MULTI-WORKER-CAS", "MULTI-RUNTIME-WORKERS" },
@@ -145,11 +162,25 @@ internal sealed class CommercialReleaseGate
         var total = AttributeInt(counters, "total");
         var passed = AttributeInt(counters, "passed");
         var failed = AttributeInt(counters, "failed") + AttributeInt(counters, "error") + AttributeInt(counters, "aborted");
+        var passingNames = document.Descendants()
+            .Where(static element => element.Name.LocalName == "UnitTestResult" && element.Attribute("outcome")?.Value == "Passed")
+            .Select(static element => element.Attribute("testName")?.Value ?? string.Empty)
+            .ToArray();
+        var missing = RequiredTestEvidence
+            .Where(required => !passingNames.Any(name => name.Contains(required, StringComparison.Ordinal)))
+            .ToArray();
         return Check(
             "UNIT_INTEGRATION",
-            total >= 50 && passed == total && failed == 0,
-            "The current release candidate unit/integration suite passed without failures",
-            new Dictionary<string, object?> { ["total"] = total, ["passed"] = passed, ["failed"] = failed });
+            total >= 50 && passed == total && failed == 0 && missing.Length == 0,
+            "The current release candidate suite passed and contains every named critical architecture, atomicity, recovery, scope, performance and privacy proof",
+            new Dictionary<string, object?>
+            {
+                ["total"] = total,
+                ["passed"] = passed,
+                ["failed"] = failed,
+                ["required_named_tests"] = RequiredTestEvidence,
+                ["missing_named_tests"] = missing
+            });
     }
 
     private static ReleaseGateCheck VerifyDocumentation(string root)

@@ -54,7 +54,12 @@ internal sealed class LargeRepositoryScenario(VerificationOptions options)
             var deltaMs = stopwatch.Elapsed.TotalMilliseconds;
             var changed = status.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length;
             var count = Directory.EnumerateFiles(root, "*.json", SearchOption.AllDirectories).LongCount();
-            var passed = count == options.FileScale && changed == 100 && fingerprint.Length == 64;
+            var requiredScalePoints = new[] { 10_000, 50_000, 100_000 };
+            var passed = count == options.FileScale &&
+                         options.FileScale >= 100_000 &&
+                         requiredScalePoints.All(creation.ContainsKey) &&
+                         changed == 100 &&
+                         fingerprint.Length == 64;
             return new[]
             {
                 new VerificationCheck(
@@ -68,6 +73,7 @@ internal sealed class LargeRepositoryScenario(VerificationOptions options)
                         ["services"] = 50,
                         ["contracts"] = 25,
                         ["creation_checkpoints_ms"] = creation,
+                        ["required_scale_points"] = requiredScalePoints,
                         ["full_fingerprint_ms"] = scanMs,
                         ["git_add_commit_ms"] = gitIndexMs,
                         ["affected_files"] = changed,
