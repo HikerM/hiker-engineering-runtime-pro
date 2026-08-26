@@ -13,6 +13,7 @@
 - 结构化 Decision Memory：保留理由、来源、作用域、证据、拒绝备选，并原子记录 `DECISION_SUPERSEDED`。
 - Doctor/GC 深化：检测状态代际、断边、损坏Projection、Artifact完整性和孤儿内容，并只自动修复可重建或超期对象。
 - PostgreSQL Fixture readiness 以目标数据库内真实 `SELECT 1` 为准，避免 `pg_isready` 对不存在数据库的假阳性。
+- RC publish 使用确定性 `PathMap`，禁止本机仓库绝对路径进入发布程序集。
 - ECDSA P-256 Signed Entitlement、Device Activation、Offline Grace、Signed Module / Update 与签名回滚策略。
 - 加速老化、大型语义仓库、真实进程/端口/HTTP、PostgreSQL、Codex Runtime 和 COMM-G1–G17 验证场景。
 - 1/2/4/8 并发 Fake Runtime Worker 场景，覆盖生产 Task/Agent/Lease/Ownership/Worktree 协调与释放。

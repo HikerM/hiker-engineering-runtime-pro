@@ -158,6 +158,8 @@ internal sealed class ReleasePackageBuilder
                 "--output", payloadRoot,
                 $"-p:Version={version}",
                 "-p:ContinuousIntegrationBuild=true",
+                "-p:DeterministicSourcePaths=true",
+                $"-p:PathMap={repositoryRoot}=/src",
                 "-p:DebugSymbols=false",
                 "-p:DebugType=None"
             },
