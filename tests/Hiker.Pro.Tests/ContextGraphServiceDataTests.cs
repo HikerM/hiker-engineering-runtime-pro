@@ -113,6 +113,33 @@ public sealed class ContextGraphServiceDataTests
     }
 
     [Fact]
+    public async Task EngineeringAssets_AndMinimumRuntimeSetUseObservedDependenciesOnly()
+    {
+        await using var project = await TestProject.CreateAsync();
+        var topology = new ServiceTopologyEngine(project.Coordinator);
+        await topology.RegisterAsync("service-identity", "project-1", 1, Service("identity", Array.Empty<string>()));
+        await topology.RegisterAsync("service-orders", "project-1", 1, Service("orders", new[] { "identity" }));
+        await topology.RegisterAsync("service-web", "project-1", 1, Service("web", new[] { "orders" }));
+        var runtime = await topology.ResolveMinimumRuntimeSetAsync("project-1", new[] { "web" });
+        Assert.Equal("RESOLVED", runtime.Status);
+        Assert.Equal(new[] { "identity", "orders", "web" }, runtime.Services);
+
+        var assets = new EngineeringAssetRegistry(project.Coordinator);
+        Assert.Equal("COMMITTED", (await assets.RegisterRuntimeProfileAsync(
+            "profile-web", "project-1", 1,
+            new RuntimeProfileDescriptor("web-node", "web", "typescript", "22", "node", "npm", "npm run build", "npm test", "npm start", "npm run debug", "/health", new[] { "test", "production" }, new[] { "orders" }, "profile-source"))).Status);
+        Assert.Equal("COMMITTED", (await assets.RegisterScriptAsync(
+            "script-backup", "project-1", 1,
+            new ScriptDescriptor("backup-script", "backup database", "pwsh", new[] { "database" }, new[] { "archive" }, new[] { "writes archive" },
+                new[] { new EngineeringDependencyRef(EntityKinds.Database, "orders-db") }, "HIGH", "restore verified archive", "script-source"))).Status);
+        Assert.Equal("COMMITTED", (await assets.RegisterMiddlewareAsync(
+            "middleware-cache", "project-1", 1,
+            new MiddlewareDescriptor("redis", "CACHE", "7", new[] { "orders" }, "HIGH", "environment", "PING", "fail closed for writes", "middleware-source"))).Status);
+        var middlewareEdges = await project.Store.QueryDependenciesAsync("project-1", EntityKinds.Service, "orders", outgoing: true);
+        Assert.Contains(middlewareEdges, static edge => edge.ToKind == EntityKinds.Middleware && edge.ToId == "redis");
+    }
+
+    [Fact]
     public async Task SqlitePerformance_UsesRealQueryPlansConcurrencyAndNPlusOneEvidence()
     {
         await using var project = await TestProject.CreateAsync();
@@ -152,6 +179,28 @@ public sealed class ContextGraphServiceDataTests
         var observations = Enumerable.Range(0, 12).Select(index => new QueryObservation("request-1", "orders-by-user", $"user-{index}", TimeSpan.FromMilliseconds(2))).ToArray();
         var nPlusOne = Assert.Single(DataPerformanceEngine.DetectNPlusOne(observations));
         Assert.Equal(12, nPlusOne.Executions);
+
+        var before = Evidence("orders", p95: 80, p99: 100, qps: 500, poolWait: 2, lockWait: 3);
+        var after = Evidence("orders", p95: 130, p99: 170, qps: 300, poolWait: 20, lockWait: 30);
+        var regression = DataPerformanceEngine.Evaluate(new PerformanceContract(100, 150, 0.01, 10, 15, 0, 400), before, after);
+        Assert.Equal("PERFORMANCE_FAIL", regression.Status);
+        Assert.Contains("P95_REGRESSION", regression.Violations);
+        Assert.Equal("POOL_EXHAUSTED", DataPerformanceEngine.AnalyzePool(new[]
+        {
+            new ConnectionPoolObservation(2, false),
+            new ConnectionPoolObservation(100, true)
+        }).Status);
+        Assert.Equal("DEADLOCK_DETECTED", DataPerformanceEngine.AnalyzeLocks(new[]
+        {
+            new LockObservation(3, false, false),
+            new LockObservation(50, true, false)
+        }).Status);
+        Assert.Equal(16, DataPerformanceEngine.FindSaturation(new[]
+        {
+            new SaturationSample(4, 400, 10, 0),
+            new SaturationSample(8, 700, 12, 0),
+            new SaturationSample(16, 720, 30, 0)
+        }).SaturationPoint);
     }
 
     [Fact]
@@ -201,4 +250,30 @@ public sealed class ContextGraphServiceDataTests
         StateLifecycle lifecycle = StateLifecycle.Valid,
         RetentionTier retention = RetentionTier.Hot) => new(
         new StateKey("project-1", kind, id), 0, 1, lifecycle, "TEST", "3.0.0", $"source-{id}", $"deps-{id}", payload, retention);
+
+    private static ServiceDescriptor Service(string id, IReadOnlyList<string> dependencies) => new(
+        id,
+        "dotnet",
+        "9.0",
+        "MSBuild",
+        new[] { $"http:{id}" },
+        Array.Empty<string>(),
+        Array.Empty<string>(),
+        Array.Empty<ServiceContractDescriptor>(),
+        dependencies,
+        $"source-{id}");
+
+    private static WorkloadEvidence Evidence(string workload, double p95, double p99, double qps, double poolWait, double lockWait) => new(
+        workload,
+        true,
+        p95 / 2,
+        p95,
+        p99,
+        qps,
+        qps / 2,
+        0,
+        poolWait,
+        lockWait,
+        0,
+        8);
 }

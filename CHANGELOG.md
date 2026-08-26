@@ -8,6 +8,7 @@
 - provider-neutral Runtime Contract、Codex CLI Adapter、Worktree 隔离、Handoff、Checkpoint、Crash Recovery 与资源释放。
 - 风险自适应冲突调度、独立 Assurance Lane 与串行授权的持久化 Merge Queue。
 - 有界 Context Resolver、Project Resume、Intent/Dependency/Evidence Graph、Service Topology、Resource Lease 与 Data Performance Engine。
+- Runtime/Script/Middleware 工程资产、最小运行集、性能契约、Pool/Lock 分析与饱和点判定。
 - ECDSA P-256 Signed Entitlement、Device Activation、Offline Grace、Signed Module / Update 与签名回滚策略。
 - 加速老化、大型语义仓库、真实进程/端口/HTTP、PostgreSQL、Codex Runtime 和 COMM-G1–G17 验证场景。
 - 商业 RC 工具：外部私钥签名、确定性 Manifest、逐文件 Hash、ZIP Checksum、独立信任根验证、隐私扫描、篡改拒绝和隔离 Clean Install。

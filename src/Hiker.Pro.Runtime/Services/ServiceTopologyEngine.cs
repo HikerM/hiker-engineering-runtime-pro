@@ -22,6 +22,7 @@ public sealed record ServiceDescriptor(
     string SourceFingerprint);
 
 public sealed record ServiceRegistrationResult(string Status, long Generation, int Contracts, int Dependencies);
+public sealed record MinimumRuntimeSet(IReadOnlyList<string> Services, IReadOnlyList<string> MissingDependencies, int DependencyEdges, string Status);
 
 public sealed class ServiceTopologyEngine(StateCoordinator state)
 {
@@ -78,6 +79,46 @@ public sealed class ServiceTopologyEngine(StateCoordinator state)
         return states.Select(state => System.Text.Json.JsonSerializer.Deserialize<ServiceDescriptor>(state.PayloadJson)
             ?? throw new InvalidDataException($"Invalid service descriptor {state.Key.EntityId}"))
             .ToArray();
+    }
+
+    public async Task<MinimumRuntimeSet> ResolveMinimumRuntimeSetAsync(
+        string projectId,
+        IReadOnlyList<string> affectedServiceIds,
+        int maximumServices = 256,
+        CancellationToken cancellationToken = default)
+    {
+        if (affectedServiceIds.Count is < 1 or > 128 || maximumServices is < 1 or > 4096)
+            throw new ArgumentOutOfRangeException(nameof(affectedServiceIds), "Runtime set budgets are invalid");
+        var services = (await ActiveServicesAsync(projectId, cancellationToken).ConfigureAwait(false))
+            .ToDictionary(static service => service.ServiceId, StringComparer.Ordinal);
+        var selected = new HashSet<string>(StringComparer.Ordinal);
+        var missing = new HashSet<string>(StringComparer.Ordinal);
+        var queue = new Queue<string>(affectedServiceIds.Distinct(StringComparer.Ordinal));
+        var edges = 0;
+        while (queue.Count > 0)
+        {
+            var serviceId = queue.Dequeue();
+            if (!selected.Add(serviceId)) continue;
+            if (selected.Count > maximumServices)
+                return new MinimumRuntimeSet(selected.OrderBy(static value => value, StringComparer.Ordinal).ToArray(), missing.ToArray(), edges, "REQUIRES_REVIEW");
+            if (!services.TryGetValue(serviceId, out var service))
+            {
+                missing.Add(serviceId);
+                continue;
+            }
+
+            foreach (var dependency in service.Dependencies)
+            {
+                edges++;
+                queue.Enqueue(dependency);
+            }
+        }
+
+        return new MinimumRuntimeSet(
+            selected.OrderBy(static value => value, StringComparer.Ordinal).ToArray(),
+            missing.OrderBy(static value => value, StringComparer.Ordinal).ToArray(),
+            edges,
+            missing.Count == 0 ? "RESOLVED" : "REQUIRES_REVIEW");
     }
 
     private static StateMutation Mutation(StateKey key, StateSnapshot? current, long revision, string fingerprint, object payload) => new(

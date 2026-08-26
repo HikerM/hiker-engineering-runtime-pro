@@ -198,7 +198,7 @@ public sealed class SqlitePerformanceAdapter(string connectionString) : IDatabas
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 }
 
-public static class DataPerformanceEngine
+public static partial class DataPerformanceEngine
 {
     public static IReadOnlyList<NPlusOneFinding> DetectNPlusOne(IEnumerable<QueryObservation> observations, int threshold = 8) => observations
         .GroupBy(static item => (item.ParentOperationId, item.QueryFingerprint))

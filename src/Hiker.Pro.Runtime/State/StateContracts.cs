@@ -48,6 +48,13 @@ public static class EntityKinds
     public const string Candidate = "CANDIDATE";
     public const string Release = "RELEASE";
     public const string RuntimeProfile = "RUNTIME_PROFILE";
+    public const string Requirement = "REQUIREMENT";
+    public const string Code = "CODE";
+    public const string Database = "DATABASE";
+    public const string Ui = "UI";
+    public const string Test = "TEST";
+    public const string Script = "SCRIPT";
+    public const string Middleware = "MIDDLEWARE";
     public const string Service = "SERVICE";
     public const string Contract = "CONTRACT";
     public const string ResourceLease = "RESOURCE_LEASE";
