@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>hiker-license-issuer</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Hiker.Pro.Runtime/Hiker.Pro.Runtime.csproj" />
+  </ItemGroup>
+</Project>
