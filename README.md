@@ -63,7 +63,7 @@ Context Resolver、`hiker resume`、结构化 Decision Memory、Intent/Dependenc
 
 | 验证面 | 结果 | 证据等级 |
 | --- | --- | --- |
-| Unit / Integration | 当前源码 66/66 PASS；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
+| Unit / Integration | 当前源码 69/69 PASS；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
 | Community 5.18 回归 | 五插件合计 297/297 PASS，公开工作区保持干净 | `DETERMINISTIC_VERIFIED` |
 | 加速老化 | 12 个合成月份、1201 Task、120 Goal Revision、120 Handoff、60 Crash | `SIMULATION_PROVEN` |
 | 并发写入 | 1/2/4/8 Worker 均恰好一个 CAS 成功；Runtime Worker 结果需由当前提交重跑确认 | `SIMULATION_PROVEN` |

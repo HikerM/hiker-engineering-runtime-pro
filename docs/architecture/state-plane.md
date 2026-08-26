@@ -25,6 +25,6 @@ Every import creates a verified pre-import SQLite backup. `hiker restore` requir
 
 ## Doctor and GC
 
-Doctor checks SQLite integrity, schema version and checksum, legal lifecycle/retention values, incomplete operations, and artifact path existence without resolving outside `.ai`. Repair is intentionally conservative: it may rebuild indexes and optimize the database, but it does not fabricate missing state or delete user evidence.
+Doctor checks SQLite integrity, schema version and checksum, generation/fingerprint facts, legal lifecycle/retention values, incomplete operations, broken dependency endpoints, materialized-view provenance, Artifact paths, byte counts, SHA-256 and orphan content-addressed files without resolving outside `.ai`. Repair is intentionally conservative: it removes only invalid rebuildable materialized views, then rebuilds indexes and optimizes the database; it never fabricates missing state or deletes user evidence.
 
-GC archives stale and superseded durable facts. It may delete only explicitly `CACHE` or `TEMP` entities by age. Durable user facts and referenced artifacts are never silently removed.
+GC archives stale and superseded durable facts. It may delete only explicitly `CACHE` or `TEMP` entities by age, plus aged content-addressed files that have no Artifact metadata reference. Durable user facts and referenced artifacts are never silently removed.

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 
 namespace Hiker.Pro.State;
@@ -99,8 +100,18 @@ public sealed partial class SqliteStateStore
         MaterializationRequest request,
         CancellationToken cancellationToken = default)
     {
+        _ = new StateKey(request.ProjectId, "MATERIALIZED_VIEW", request.ViewName).Normalize();
+        if (request.SourceGeneration < 0 || string.IsNullOrWhiteSpace(request.Fingerprint) || request.Fingerprint.Length > 256)
+        {
+            throw new ArgumentException("Materialized view generation and fingerprint are invalid", nameof(request));
+        }
         SqliteMapping.ValidateJson(request.PayloadJson, nameof(request.PayloadJson));
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        var currentGeneration = long.Parse(await MetadataAsync(connection, "global_generation", cancellationToken).ConfigureAwait(false) ?? "0", System.Globalization.CultureInfo.InvariantCulture);
+        if (request.SourceGeneration > currentGeneration)
+        {
+            throw new InvalidOperationException("Materialized view cannot reference a future state generation");
+        }
         await using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO materialized_views(project_id, view_name, source_generation, payload_json, fingerprint, updated_at)
@@ -180,6 +191,57 @@ public sealed partial class SqliteStateStore
             }
         }
 
+        var globalGeneration = long.Parse(await MetadataAsync(connection, "global_generation", cancellationToken).ConfigureAwait(false) ?? "0", System.Globalization.CultureInfo.InvariantCulture);
+        await using (var integrity = connection.CreateCommand())
+        {
+            integrity.CommandText = """
+                SELECT COUNT(*) FROM entities
+                WHERE generation <= 0 OR generation > $generation OR goal_revision < 0
+                   OR length(trim(authority)) = 0 OR length(trim(schema_version)) = 0
+                   OR length(trim(source_fingerprint)) = 0 OR length(trim(dependency_fingerprint)) = 0
+                   OR json_valid(payload_json) = 0;
+                """;
+            integrity.Parameters.AddWithValue("$generation", globalGeneration);
+            var count = Convert.ToInt32(await integrity.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+            if (count > 0)
+            {
+                findings.Add(new HealthFinding("INVALID_STATE_FACT", "BLOCKED", "entities", count.ToString(System.Globalization.CultureInfo.InvariantCulture), false));
+            }
+        }
+
+        await using (var dependencies = connection.CreateCommand())
+        {
+            dependencies.CommandText = """
+                SELECT COUNT(*)
+                FROM dependency_edges edge
+                LEFT JOIN entities source
+                  ON source.project_id=edge.project_id AND source.kind=edge.from_kind AND source.entity_id=edge.from_id
+                LEFT JOIN entities target
+                  ON target.project_id=edge.project_id AND target.kind=edge.to_kind AND target.entity_id=edge.to_id
+                WHERE edge.lifecycle='VALID' AND (source.entity_id IS NULL OR target.entity_id IS NULL);
+                """;
+            var count = Convert.ToInt32(await dependencies.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+            if (count > 0)
+            {
+                findings.Add(new HealthFinding("BROKEN_DEPENDENCY", "BLOCKED", "dependency_edges", count.ToString(System.Globalization.CultureInfo.InvariantCulture), false));
+            }
+        }
+
+        await using (var projections = connection.CreateCommand())
+        {
+            projections.CommandText = """
+                SELECT COUNT(*) FROM materialized_views
+                WHERE source_generation < 0 OR source_generation > $generation
+                   OR length(trim(fingerprint)) = 0 OR json_valid(payload_json) = 0;
+                """;
+            projections.Parameters.AddWithValue("$generation", globalGeneration);
+            var count = Convert.ToInt32(await projections.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+            if (count > 0)
+            {
+                findings.Add(new HealthFinding("CORRUPT_MATERIALIZED_VIEW", "REPAIRABLE", "materialized_views", count.ToString(System.Globalization.CultureInfo.InvariantCulture), true));
+            }
+        }
+
         await using (var prepared = connection.CreateCommand())
         {
             prepared.CommandText = "SELECT COUNT(*) FROM operations WHERE status <> 'COMPLETE';";
@@ -190,26 +252,54 @@ public sealed partial class SqliteStateStore
             }
         }
 
+        var artifactFacts = new List<(string Id, string Hash, long Bytes, string RelativeRef)>();
         await using (var artifacts = connection.CreateCommand())
         {
-            artifacts.CommandText = "SELECT artifact_id, relative_ref FROM artifacts;";
+            artifacts.CommandText = "SELECT artifact_id, sha256, bytes, relative_ref FROM artifacts;";
             await using var reader = await artifacts.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                var relative = reader.GetString(1).Replace('/', Path.DirectorySeparatorChar);
-                string? path = null;
-                try
-                {
-                    path = _layout.ResolveAiRelativePath(relative);
-                }
-                catch (InvalidDataException)
-                {
-                    // Report the invalid reference below without resolving outside the project.
-                }
+                artifactFacts.Add((reader.GetString(0), reader.GetString(1), reader.GetInt64(2), reader.GetString(3)));
+            }
+        }
 
-                if (path is null || !File.Exists(path))
+        foreach (var artifact in artifactFacts)
+        {
+            var relative = artifact.RelativeRef.Replace('/', Path.DirectorySeparatorChar);
+            string? path = null;
+            try
+            {
+                path = _layout.ResolveAiRelativePath(relative);
+            }
+            catch (InvalidDataException)
+            {
+                // Report the invalid reference below without resolving outside the project.
+            }
+
+            if (path is null || !File.Exists(path))
+            {
+                findings.Add(new HealthFinding("BROKEN_ARTIFACT_REF", "BLOCKED", artifact.Id, relative, false));
+                continue;
+            }
+
+            var info = new FileInfo(path);
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 128 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var actual = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false)).ToLowerInvariant();
+            if (info.Length != artifact.Bytes || !string.Equals(actual, artifact.Hash, StringComparison.OrdinalIgnoreCase))
+            {
+                findings.Add(new HealthFinding("CORRUPT_ARTIFACT", "BLOCKED", artifact.Id, "size or SHA-256 mismatch", false));
+            }
+        }
+
+        var referencedHashes = artifactFacts.Select(static value => value.Hash).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (Directory.Exists(_layout.ArtifactsRoot))
+        {
+            foreach (var path in Directory.EnumerateFiles(_layout.ArtifactsRoot, "*", SearchOption.AllDirectories))
+            {
+                var name = Path.GetFileName(path);
+                if (IsSha256Name(name) && !referencedHashes.Contains(name))
                 {
-                    findings.Add(new HealthFinding("BROKEN_ARTIFACT_REF", "BLOCKED", reader.GetString(0), relative, false));
+                    findings.Add(new HealthFinding("ORPHAN_ARTIFACT", "REPAIRABLE", name, "content-addressed file has no metadata reference", true));
                 }
             }
         }
@@ -225,11 +315,20 @@ public sealed partial class SqliteStateStore
     public async Task<RepairReport> RepairAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        var generation = long.Parse(await MetadataAsync(connection, "global_generation", cancellationToken).ConfigureAwait(false) ?? "0", System.Globalization.CultureInfo.InvariantCulture);
         await using var command = connection.CreateCommand();
-        command.CommandText = "REINDEX; PRAGMA optimize;";
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        command.CommandText = """
+            DELETE FROM materialized_views
+            WHERE source_generation < 0 OR source_generation > $generation
+               OR length(trim(fingerprint)) = 0 OR json_valid(payload_json) = 0;
+            """;
+        command.Parameters.AddWithValue("$generation", generation);
+        var repaired = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await using var optimize = connection.CreateCommand();
+        optimize.CommandText = "REINDEX; PRAGMA optimize;";
+        await optimize.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         var health = await HealthCheckAsync(cancellationToken).ConfigureAwait(false);
-        return new RepairReport(health.Status, health.Status == "HEALTHY" ? 1 : 0, health.Findings);
+        return new RepairReport(health.Status, repaired, health.Findings);
     }
 
     public async Task<GcReport> GarbageCollectAsync(DateTimeOffset olderThan, CancellationToken cancellationToken = default)
@@ -255,7 +354,21 @@ public sealed partial class SqliteStateStore
             olderThan,
             cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-        return new GcReport(archived, deletedCache, deletedTemp, 0);
+        var referenced = await ReferencedArtifactHashesAsync(cancellationToken).ConfigureAwait(false);
+        var orphanArtifacts = 0;
+        if (Directory.Exists(_layout.ArtifactsRoot))
+        {
+            foreach (var path in Directory.EnumerateFiles(_layout.ArtifactsRoot, "*", SearchOption.AllDirectories))
+            {
+                var info = new FileInfo(path);
+                if (info.LastWriteTimeUtc < olderThan.UtcDateTime && IsSha256Name(info.Name) && !referenced.Contains(info.Name))
+                {
+                    File.Delete(path);
+                    orphanArtifacts++;
+                }
+            }
+        }
+        return new GcReport(archived, deletedCache, deletedTemp, orphanArtifacts);
     }
 
     public async Task<StoreMetrics> GetMetricsAsync(CancellationToken cancellationToken = default)
@@ -338,4 +451,7 @@ public sealed partial class SqliteStateStore
         command.CommandText = $"SELECT COUNT(*) FROM {table};";
         return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
     }
+
+    private static bool IsSha256Name(string value) => value.Length == 64 && value.All(static character =>
+        character is >= '0' and <= '9' or >= 'a' and <= 'f' or >= 'A' and <= 'F');
 }

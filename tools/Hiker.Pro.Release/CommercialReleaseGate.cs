@@ -21,6 +21,8 @@ internal sealed class CommercialReleaseGate
         "Scheduler_AdmitsDisjointWorkDefersConflictsAndRequiresIndependentAssurance",
         "MergeQueue_RequiresAssuranceSerializesAuthorizationAndObservesRealGitMerge",
         "ProductionDomainWrites_AreRoutedThroughStateCoordinator",
+        "DoctorDetectsArtifactCorruptionAndBrokenDependency",
+        "DoctorRepairDropsOnlyInvalidProjectionAndGcRemovesAgedOrphanArtifact",
         "ContextResolver_CostDependsOnTaskEdgesNotColdHistorySize",
         "SqlitePerformance_UsesRealQueryPlansConcurrencyAndNPlusOneEvidence",
         "SensitiveContentPolicy_DetectsDirectAndEscapedHomesWithoutFlaggingProductIdentifiers"

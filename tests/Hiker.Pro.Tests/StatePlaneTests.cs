@@ -286,6 +286,70 @@ public sealed class StatePlaneTests
         Assert.Contains(health.Findings, item => item.Code == "BROKEN_ARTIFACT_REF" && !item.Repairable);
     }
 
+    [Fact]
+    public async Task DoctorDetectsArtifactCorruptionAndBrokenDependency()
+    {
+        await using var project = await TestProject.CreateAsync();
+        var artifacts = new ContentAddressedArtifactStore(project.Layout, project.Coordinator);
+        var record = await artifacts.PutAsync(Put("verified evidence"));
+        var path = project.Layout.ResolveAiRelativePath(record.RelativeRef);
+        await File.WriteAllTextAsync(path, "tampered evidence");
+        var mutation = Mutation(EntityKinds.Task, "dependency-source", "{\"status\":\"RUNNING\"}");
+        var edge = new DependencyEdge("project-1", EntityKinds.Task, "dependency-source", EntityKinds.Contract, "missing-contract", "CONSUMES", "missing-contract-edge");
+        Assert.True((await project.Store.CompareAndSwapBatchAsync(new BatchTransactionRequest(
+            "broken-dependency", new[] { mutation }, "FIXTURE_CREATED", "FIXTURE_CREATED", "{}", new[] { edge }))).Committed);
+
+        var health = await project.Store.HealthCheckAsync();
+
+        Assert.Equal("BLOCKED", health.Status);
+        Assert.Contains(health.Findings, static item => item.Code == "CORRUPT_ARTIFACT" && !item.Repairable);
+        Assert.Contains(health.Findings, static item => item.Code == "BROKEN_DEPENDENCY" && !item.Repairable);
+    }
+
+    [Fact]
+    public async Task DoctorRepairDropsOnlyInvalidProjectionAndGcRemovesAgedOrphanArtifact()
+    {
+        await using var project = await TestProject.CreateAsync();
+        await using (var connection = new SqliteConnection($"Data Source={project.Layout.DatabasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO materialized_views(project_id,view_name,source_generation,payload_json,fingerprint,updated_at)
+                VALUES('project-1','future-view',999,'{}','future','2026-01-01T00:00:00Z');
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+        var projectionHealth = await project.Store.HealthCheckAsync();
+        Assert.Equal("REPAIRABLE", projectionHealth.Status);
+        Assert.Contains(projectionHealth.Findings, static item => item.Code == "CORRUPT_MATERIALIZED_VIEW" && item.Repairable);
+        var repaired = await project.Coordinator.RepairAsync();
+        Assert.Equal(1, repaired.Repaired);
+        Assert.Equal("HEALTHY", repaired.Status);
+
+        var orphanHash = new string('a', 64);
+        var orphanDirectory = Path.Combine(project.Layout.ArtifactsRoot, "aa");
+        Directory.CreateDirectory(orphanDirectory);
+        var orphanPath = Path.Combine(orphanDirectory, orphanHash);
+        await File.WriteAllTextAsync(orphanPath, "orphan");
+        File.SetLastWriteTimeUtc(orphanPath, DateTime.UtcNow.AddDays(-2));
+        var orphanHealth = await project.Store.HealthCheckAsync();
+        Assert.Equal("REPAIRABLE", orphanHealth.Status);
+        Assert.Contains(orphanHealth.Findings, static item => item.Code == "ORPHAN_ARTIFACT" && item.Repairable);
+        var gc = await project.Coordinator.GarbageCollectAsync(DateTimeOffset.UtcNow.AddDays(-1));
+        Assert.Equal(1, gc.OrphanArtifacts);
+        Assert.False(File.Exists(orphanPath));
+        Assert.Equal("HEALTHY", (await project.Store.HealthCheckAsync()).Status);
+    }
+
+    [Fact]
+    public async Task MaterializedViewRejectsFutureGenerationBeforeWrite()
+    {
+        await using var project = await TestProject.CreateAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => project.Coordinator.MaterializeAsync(new MaterializationRequest(
+            "project-1", "future-view", 1, "{}", "future")));
+    }
+
     private static TransactionRequest Request(string operationId, string value) => new(
         operationId,
         new StateMutation(
