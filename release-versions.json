@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0.0",
+  "product": "5.19.0-dev.1",
+  "runtime": "0.1.0",
+  "state_schema": "3.0.0",
+  "community_baseline": "5.18.0+codex.20260826161321",
+  "community_commit": "05e94e32af719c81f740fe2af08c35f98a527588"
+}

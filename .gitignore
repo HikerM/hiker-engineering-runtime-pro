@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+TestResults/
+artifacts/
+.ai/
+*.user
+*.suo
+*.pfx
+*.p12
+*.key
+*.pem
+private-keys/
+secrets/

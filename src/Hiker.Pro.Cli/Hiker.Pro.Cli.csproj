@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>hiker</AssemblyName>
+    <RootNamespace>Hiker.Pro.Cli</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Hiker.Pro.Runtime/Hiker.Pro.Runtime.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/Hiker.Pro.Runtime/Hiker.Pro.Runtime.csproj" />
+  <Project Path="src/Hiker.Pro.Cli/Hiker.Pro.Cli.csproj" />
+  <Project Path="tests/Hiker.Pro.Tests/Hiker.Pro.Tests.csproj" />
+</Solution>
