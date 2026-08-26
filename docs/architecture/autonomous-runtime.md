@@ -14,6 +14,14 @@ An adapter must start suspended in `STARTING`. It cannot write task surfaces bef
 - Task, Agent, Runtime Lease, Ownership, and Worktree move at one State Plane generation.
 - Lease age is never proof of death. A matching PID, process start time, executable fingerprint, and host fingerprint prevents takeover even after expiry.
 
+## Conflict-aware scheduling
+
+`ConflictAwareScheduler` computes a bounded admission plan from active Worktree facts, predicted affected scopes and declared engineering risk. Disjoint LOW/MEDIUM writers may use up to three lanes; HIGH/CRITICAL work contracts to one writer lane and requires a distinct assurance lane. Scope overlap, exhausted capacity or missing assurance produces a deterministic defer decision before an Adapter starts. Assurance lanes never count as another writer and cannot assure their own Task.
+
+## Controlled merge queue
+
+`MergeQueueCoordinator` stores each candidate and one target-branch control record through the State Coordinator. Enqueue requires a clean immutable Worktree commit descended from its declared base, test evidence, and—for HIGH/CRITICAL work—evidence from a different assurance runtime. Authorization atomically reserves the target queue for exactly one ready candidate and refuses a moved or dirty target. Hiker does not execute an implicit merge: an external Git action consumes the authorization, after which completion verifies that the candidate commit is present on the clean target before archiving the candidate and releasing the queue.
+
 ## Safe handoff
 
 Handoff pauses the current runtime, validates Git workspace facts, creates a checkpoint, and writes a content-addressed `hiker-minimal-handoff/v1` package. The package contains IDs, goal revision, checkpoint reference, Git HEAD/branch/status fingerprint, bounded relevant-state references, and acceptance IDs. It explicitly excludes complete prompts, chat history, source files, and stream deltas.

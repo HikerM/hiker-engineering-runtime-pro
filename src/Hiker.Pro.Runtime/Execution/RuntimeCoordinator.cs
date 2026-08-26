@@ -187,7 +187,7 @@ public sealed class RuntimeCoordinator(
             workspace.GitCommonDirectory,
             workspace.Head,
             workspace.Branch,
-            NormalizeScopes(request.PredictedAffectedScopes),
+            AffectedScopePolicy.Normalize(request.PredictedAffectedScopes),
             "ACTIVE",
             now);
         return await coordinator.CommitBatchAsync(new BatchTransactionRequest(
@@ -241,12 +241,12 @@ public sealed class RuntimeCoordinator(
             throw new InvalidOperationException("Runtime adapter must support suspended start and resume");
         }
 
-        _ = NormalizeScopes(request.PredictedAffectedScopes);
+        _ = AffectedScopePolicy.Normalize(request.PredictedAffectedScopes);
     }
 
     private async Task ValidateWorktreeConflictsAsync(RuntimeStartRequest request, WorkspaceSnapshot workspace, CancellationToken cancellationToken)
     {
-        var requestedScopes = NormalizeScopes(request.PredictedAffectedScopes);
+        var requestedScopes = AffectedScopePolicy.Normalize(request.PredictedAffectedScopes);
         var worktrees = await coordinator.ReadAsync(request.ProjectId, EntityKinds.Worktree, StateLifecycle.Valid, 1000, cancellationToken).ConfigureAwait(false);
         foreach (var state in worktrees)
         {
@@ -259,43 +259,12 @@ public sealed class RuntimeCoordinator(
 
             if (string.Equals(Path.GetFullPath(active.Root), workspace.Root, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) ||
                 string.Equals(active.TaskId, request.TaskId, StringComparison.Ordinal) ||
-                ScopesOverlap(active.PredictedAffectedScopes, requestedScopes))
+                AffectedScopePolicy.Overlap(active.PredictedAffectedScopes, requestedScopes))
             {
                 throw new InvalidOperationException($"Worktree or predicted affected scope conflicts with active task {active.TaskId}");
             }
         }
     }
-
-    private static IReadOnlyList<string> NormalizeScopes(IReadOnlyList<string>? scopes)
-    {
-        var values = scopes is null || scopes.Count == 0 ? new[] { "." } : scopes;
-        if (values.Count > 128)
-        {
-            throw new ArgumentOutOfRangeException(nameof(scopes), "Predicted affected scope exceeds 128 entries");
-        }
-
-        return values.Select(static value =>
-        {
-            var normalized = value.Replace('\\', '/').Trim().Trim('/');
-            if (normalized.Length == 0 || normalized == ".")
-            {
-                return ".";
-            }
-
-            if (Path.IsPathRooted(value) || normalized == ".." || normalized.StartsWith("../", StringComparison.Ordinal) || normalized.Contains("/../", StringComparison.Ordinal))
-            {
-                throw new ArgumentException("Affected scopes must be repository-relative paths", nameof(scopes));
-            }
-
-            return normalized;
-        }).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray();
-    }
-
-    private static bool ScopesOverlap(IReadOnlyList<string> left, IReadOnlyList<string> right) => left.Any(a => right.Any(b =>
-        a == "." || b == "." ||
-        string.Equals(a, b, StringComparison.OrdinalIgnoreCase) ||
-        a.StartsWith($"{b}/", StringComparison.OrdinalIgnoreCase) ||
-        b.StartsWith($"{a}/", StringComparison.OrdinalIgnoreCase)));
 
     private static async Task BestEffortInterruptAsync(IExecutionRuntimeAdapter adapter, RuntimeHandle handle, CancellationToken cancellationToken)
     {
