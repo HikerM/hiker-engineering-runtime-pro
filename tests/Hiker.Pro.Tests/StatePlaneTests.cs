@@ -183,6 +183,49 @@ public sealed class StatePlaneTests
     }
 
     [Fact]
+    public async Task BatchCompareAndSwap_CommitsTaskLeaseAndOwnershipAtOneGeneration()
+    {
+        await using var project = await TestProject.CreateAsync();
+        var mutations = new[]
+        {
+            Mutation(EntityKinds.Task, "task-1", "{\"status\":\"RUNNING\"}"),
+            Mutation(EntityKinds.RuntimeLease, "task-1", "{\"owner\":\"runtime-1\"}"),
+            Mutation(EntityKinds.Ownership, "task-1", "{\"writer\":\"runtime-1\"}")
+        };
+        var request = new BatchTransactionRequest("batch-start", mutations, "TASK_STARTED", "TASK_RUNTIME_BOUND", "{}");
+        var result = await project.Store.CompareAndSwapBatchAsync(request);
+        var retry = await project.Store.CompareAndSwapBatchAsync(request);
+        Assert.True(result.Committed);
+        Assert.Equal(3, result.Snapshots.Count);
+        Assert.Single(result.Snapshots.Select(static snapshot => snapshot.Generation).Distinct());
+        Assert.Equal("IDEMPOTENT_REPLAY", retry.Status);
+        Assert.Equal(3, (await project.Store.GetMetricsAsync()).Entities);
+        Assert.Equal(1, (await project.Store.GetMetricsAsync()).Events);
+    }
+
+    [Fact]
+    public async Task BatchCompareAndSwap_RejectsWholeBatchWhenOneMemberIsStale()
+    {
+        await using var project = await TestProject.CreateAsync();
+        Assert.True((await project.Store.CompareAndSwapAsync(Request("batch-seed", "seed"))).Committed);
+        var request = new BatchTransactionRequest(
+            "batch-stale",
+            new[]
+            {
+                Mutation(EntityKinds.Task, "task-1", "{\"status\":\"RUNNING\"}"),
+                Mutation(EntityKinds.RuntimeLease, "task-1", "{\"owner\":\"runtime-1\"}")
+            },
+            "TASK_STARTED",
+            "TASK_RUNTIME_BOUND",
+            "{}");
+        var result = await project.Store.CompareAndSwapBatchAsync(request);
+        Assert.True(result.Conflict);
+        Assert.Equal("STALE_CONTEXT", result.Status);
+        Assert.Null(await project.Store.ReadAsync(new StateKey("project-1", EntityKinds.RuntimeLease, "task-1")));
+        Assert.Equal(1, (await project.Store.GetMetricsAsync()).Entities);
+    }
+
+    [Fact]
     public async Task ReasoningSnapshot_HoldsNoTransactionOrWriterLock()
     {
         await using var project = await TestProject.CreateAsync();
@@ -237,6 +280,17 @@ public sealed class StatePlaneTests
         "TASK_CREATED",
         "TASK_CREATED",
         "{}");
+
+    private static StateMutation Mutation(string kind, string id, string payload) => new(
+        new StateKey("project-1", kind, id),
+        0,
+        1,
+        StateLifecycle.Valid,
+        "STATE_COORDINATOR",
+        "3.0.0",
+        "source-1",
+        "deps-1",
+        payload);
 
     private static Task<TransactionResult> Commit(
         StateCoordinator coordinator,

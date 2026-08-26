@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Hiker.Pro.Diagnostics;
+using Hiker.Pro.Execution;
 using Hiker.Pro.State;
 
 var options = new JsonSerializerOptions
@@ -48,13 +50,19 @@ try
                 return repair.Status == "BLOCKED" ? 2 : 0;
             }
 
-            var health = await store.HealthCheckAsync().ConfigureAwait(false);
+            var doctorProject = ValueAfter(args, "--project-id");
+            var health = doctorProject is null
+                ? await store.HealthCheckAsync().ConfigureAwait(false)
+                : await new AdvancedDoctor(store, new ProcessIdentityProbe()).CheckProjectAsync(doctorProject).ConfigureAwait(false);
             Console.WriteLine(JsonSerializer.Serialize(health, options));
             return health.Status == "BLOCKED" ? 2 : 0;
         case "status":
             await store.InitializeAsync().ConfigureAwait(false);
             var metrics = await store.GetMetricsAsync().ConfigureAwait(false);
-            var statusHealth = await store.HealthCheckAsync().ConfigureAwait(false);
+            var statusProject = ValueAfter(args, "--project-id");
+            var statusHealth = statusProject is null
+                ? await store.HealthCheckAsync().ConfigureAwait(false)
+                : await new AdvancedDoctor(store, new ProcessIdentityProbe()).CheckProjectAsync(statusProject).ConfigureAwait(false);
             Console.WriteLine(JsonSerializer.Serialize(new { ok = statusHealth.Status != "BLOCKED", health = statusHealth, metrics }, options));
             return statusHealth.Status == "BLOCKED" ? 2 : 0;
         case "backup":

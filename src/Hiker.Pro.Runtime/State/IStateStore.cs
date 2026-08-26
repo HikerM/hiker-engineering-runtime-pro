@@ -12,6 +12,8 @@ public interface IStateStore : IAsyncDisposable
         CancellationToken cancellationToken = default);
     Task<TransactionResult> TransactionAsync(TransactionRequest request, CancellationToken cancellationToken = default);
     Task<TransactionResult> CompareAndSwapAsync(TransactionRequest request, CancellationToken cancellationToken = default);
+    Task<BatchTransactionResult> CompareAndSwapBatchAsync(BatchTransactionRequest request, CancellationToken cancellationToken = default);
+    Task<OperationReceipt?> ReadOperationReceiptAsync(string operationId, CancellationToken cancellationToken = default);
     Task<long> AppendEventAsync(EngineeringEvent engineeringEvent, CancellationToken cancellationToken = default);
     Task<InvalidationResult> InvalidateAsync(InvalidationRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<DependencyEdge>> QueryDependenciesAsync(

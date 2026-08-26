@@ -151,6 +151,130 @@ public sealed partial class SqliteStateStore : IStateStore
         return new TransactionResult(true, false, generation, snapshot, "COMMITTED");
     }
 
+    public async Task<BatchTransactionResult> CompareAndSwapBatchAsync(
+        BatchTransactionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateBatchRequest(request);
+        var mutations = request.Mutations
+            .Select(static mutation => mutation with { Key = mutation.Key.Normalize() })
+            .OrderBy(static mutation => mutation.Key.Kind, StringComparer.Ordinal)
+            .ThenBy(static mutation => mutation.Key.EntityId, StringComparer.Ordinal)
+            .ToArray();
+        var normalizedRequest = request with { Mutations = mutations };
+        var requestFingerprint = BatchRequestFingerprint(normalizedRequest);
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        var prior = await ReadOperationAsync(connection, transaction, request.OperationId, cancellationToken).ConfigureAwait(false);
+        if (prior is not null)
+        {
+            if (!string.Equals(prior.Value.Fingerprint, requestFingerprint, StringComparison.Ordinal))
+            {
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return new BatchTransactionResult(false, true, prior.Value.Generation, Array.Empty<StateSnapshot>(), "OPERATION_ID_CONFLICT");
+            }
+
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return new BatchTransactionResult(true, false, prior.Value.Generation, Array.Empty<StateSnapshot>(), "IDEMPOTENT_REPLAY");
+        }
+
+        foreach (var mutation in mutations)
+        {
+            var current = await ReadWithinAsync(connection, transaction, mutation.Key, cancellationToken).ConfigureAwait(false);
+            if ((current?.Generation ?? 0) != mutation.ExpectedGeneration)
+            {
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                return new BatchTransactionResult(
+                    false,
+                    true,
+                    current?.Generation ?? 0,
+                    current is null ? Array.Empty<StateSnapshot>() : new[] { current },
+                    "STALE_CONTEXT");
+            }
+        }
+
+        var representative = mutations[0];
+        await InsertPreparedOperationAsync(
+            connection,
+            transaction,
+            new TransactionRequest(request.OperationId, representative, request.EventType, request.SummaryCode, request.EventPayloadJson, request.DependencyChanges),
+            representative.Key,
+            requestFingerprint,
+            cancellationToken).ConfigureAwait(false);
+        var generation = await NextGenerationAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        var updatedAt = DateTimeOffset.UtcNow;
+        var committed = new List<StateSnapshot>(mutations.Length);
+        foreach (var mutation in mutations)
+        {
+            await UpsertEntityAsync(connection, transaction, mutation, generation, updatedAt, cancellationToken).ConfigureAwait(false);
+            committed.Add(new StateSnapshot(
+                mutation.Key,
+                generation,
+                mutation.GoalRevision,
+                mutation.Lifecycle,
+                mutation.Authority,
+                mutation.SchemaVersion,
+                mutation.SourceFingerprint,
+                mutation.DependencyFingerprint,
+                mutation.PayloadJson,
+                updatedAt,
+                mutation.Retention));
+        }
+
+        if (request.DependencyChanges is not null)
+        {
+            foreach (var edge in request.DependencyChanges)
+            {
+                await UpsertEdgeAsync(connection, transaction, edge, updatedAt, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        await InsertEventAsync(connection, transaction, new EngineeringEvent(
+            request.OperationId,
+            representative.Key.ProjectId,
+            request.EventType,
+            null,
+            null,
+            generation,
+            request.SummaryCode,
+            request.EventPayloadJson,
+            updatedAt), cancellationToken).ConfigureAwait(false);
+        await CompleteOperationAsync(connection, transaction, request.OperationId, generation, updatedAt, cancellationToken, request.ResultJson).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return new BatchTransactionResult(true, false, generation, ContractCollections.Freeze(committed), "COMMITTED");
+    }
+
+    public async Task<OperationReceipt?> ReadOperationReceiptAsync(string operationId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(operationId) || operationId.Length > 160)
+        {
+            throw new ArgumentException("OperationId must contain 1-160 characters", nameof(operationId));
+        }
+
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT project_id,operation_type,request_fingerprint,status,generation,entity_kind,entity_id,created_at,completed_at,result_json FROM operations WHERE operation_id=$id;";
+        command.Parameters.AddWithValue("$id", operationId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return new OperationReceipt(
+            operationId,
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetString(3),
+            reader.IsDBNull(4) ? null : reader.GetInt64(4),
+            reader.GetString(5),
+            reader.GetString(6),
+            DateTimeOffset.Parse(reader.GetString(7), System.Globalization.CultureInfo.InvariantCulture),
+            reader.IsDBNull(8) ? null : DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture),
+            reader.IsDBNull(9) ? null : reader.GetString(9));
+    }
+
     public async Task<long> AppendEventAsync(EngineeringEvent engineeringEvent, CancellationToken cancellationToken = default)
     {
         SqliteMapping.ValidateJson(engineeringEvent.PayloadJson, nameof(engineeringEvent.PayloadJson));
@@ -285,6 +409,40 @@ public sealed partial class SqliteStateStore : IStateStore
         }
     }
 
+    private static void ValidateBatchRequest(BatchTransactionRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.OperationId) || request.OperationId.Length > 160)
+        {
+            throw new ArgumentException("OperationId must contain 1-160 characters", nameof(request));
+        }
+
+        if (request.Mutations.Count is < 1 or > 256)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "A batch must contain 1-256 mutations");
+        }
+
+        var normalized = request.Mutations.Select(static mutation => mutation.Key.Normalize()).ToArray();
+        if (normalized.Select(static key => $"{key.ProjectId}|{key.Kind}|{key.EntityId}").Distinct(StringComparer.Ordinal).Count() != normalized.Length ||
+            normalized.Select(static key => key.ProjectId).Distinct(StringComparer.Ordinal).Count() != 1)
+        {
+            throw new ArgumentException("Batch mutation keys must be unique and belong to one project", nameof(request));
+        }
+
+        foreach (var mutation in request.Mutations)
+        {
+            SqliteMapping.ValidateJson(mutation.PayloadJson, nameof(request.Mutations));
+        }
+
+        SqliteMapping.ValidateJson(request.EventPayloadJson, nameof(request.EventPayloadJson));
+        if (request.DependencyChanges is not null)
+        {
+            foreach (var edge in request.DependencyChanges)
+            {
+                ValidateDependencyEdge(edge, normalized[0].ProjectId);
+            }
+        }
+    }
+
     private static string RequestFingerprint(TransactionRequest request)
     {
         var dependencyValue = request.DependencyChanges is null
@@ -310,6 +468,29 @@ public sealed partial class SqliteStateStore : IStateStore
             request.EventPayloadJson,
             dependencyValue);
         return RequestHash(value);
+    }
+
+    private static string BatchRequestFingerprint(BatchTransactionRequest request)
+    {
+        var mutationValues = request.Mutations.Select(static mutation => string.Join('|',
+            mutation.Key.ProjectId,
+            mutation.Key.Kind,
+            mutation.Key.EntityId,
+            mutation.ExpectedGeneration,
+            mutation.GoalRevision,
+            mutation.Lifecycle,
+            mutation.Authority,
+            mutation.SchemaVersion,
+            mutation.SourceFingerprint,
+            mutation.DependencyFingerprint,
+            mutation.PayloadJson,
+            mutation.Retention));
+        var dependencyValues = request.DependencyChanges is null
+            ? Array.Empty<string>()
+            : request.DependencyChanges.Select(NormalizeDependencyEdge).OrderBy(static value => value, StringComparer.Ordinal).ToArray();
+        return RequestHash(string.Join('\n', mutationValues
+            .Concat(new[] { request.EventType, request.SummaryCode, request.EventPayloadJson, request.ResultJson ?? string.Empty })
+            .Concat(dependencyValues)));
     }
 
     private static string RequestHash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();

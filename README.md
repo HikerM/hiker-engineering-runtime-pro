@@ -30,10 +30,13 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 - [Community / Pro Boundary](docs/architecture/community-pro-boundary.md)
 - [5.19 Architecture](docs/architecture/5.19-architecture.md)
 - [Project State Plane](docs/architecture/state-plane.md)
+- [Autonomous Runtime and Writer Safety](docs/architecture/autonomous-runtime.md)
 
 ## 已实现的首个垂直切片
 
 当前 State Plane 切片已具备真实 SQLite/WAL、短事务 CAS、operation 幂等、依赖边原子提交、语义事件冲突检测、内容寻址 Artifact、Doctor、保守 GC、可验证备份/恢复，以及 Community 5.18 `.ai` 状态的白名单单向导入。它仍是开发基线，不代表完整 5.19 Runtime 或商业发布就绪。
+
+Runtime 切片已建立 provider-neutral Adapter contract、Task/Agent/Lease/Ownership/Worktree 同代提交、PID+启动时间+可执行身份验证、最小交接包、崩溃恢复和两阶段资源释放。Codex 实机 Adapter、长期老化、商业信任链及完整发布门禁仍未完成。
 
 ```powershell
 dotnet run --project src/Hiker.Pro.Cli -- init --root <project>

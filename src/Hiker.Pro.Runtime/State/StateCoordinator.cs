@@ -61,4 +61,19 @@ public sealed class StateCoordinator
             _writer.Release();
         }
     }
+
+    public async Task<BatchTransactionResult> CommitBatchAsync(
+        BatchTransactionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await _writer.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await _store.CompareAndSwapBatchAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _writer.Release();
+        }
+    }
 }

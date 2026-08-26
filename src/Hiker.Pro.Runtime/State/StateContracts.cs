@@ -117,12 +117,41 @@ public sealed record TransactionRequest(
     string EventPayloadJson,
     IReadOnlyList<DependencyEdge>? DependencyChanges = null);
 
+public sealed record BatchTransactionRequest(
+    string OperationId,
+    IReadOnlyList<StateMutation> Mutations,
+    string EventType,
+    string SummaryCode,
+    string EventPayloadJson,
+    IReadOnlyList<DependencyEdge>? DependencyChanges = null,
+    string? ResultJson = null);
+
 public sealed record TransactionResult(
     bool Committed,
     bool Conflict,
     long CurrentGeneration,
     StateSnapshot? Snapshot,
     string Status);
+
+public sealed record BatchTransactionResult(
+    bool Committed,
+    bool Conflict,
+    long CurrentGeneration,
+    IReadOnlyList<StateSnapshot> Snapshots,
+    string Status);
+
+public sealed record OperationReceipt(
+    string OperationId,
+    string ProjectId,
+    string OperationType,
+    string RequestFingerprint,
+    string Status,
+    long? Generation,
+    string EntityKind,
+    string EntityId,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? CompletedAt,
+    string? ResultJson);
 
 public sealed record InvalidationRequest(
     string OperationId,
