@@ -20,6 +20,9 @@ try
         case "commercial":
             checks.AddRange(await new CommercialBoundaryScenario(options).RunAsync());
             break;
+        case "codex-runtime":
+            checks.AddRange(await new CodexRuntimeScenario(options).RunAsync());
+            break;
         case "all":
             checks.AddRange(await new StateAgingScenario().RunAsync());
             checks.AddRange(await new LargeRepositoryScenario(options).RunAsync());
@@ -62,6 +65,7 @@ static VerificationOptions Parse(string[] values)
     string? output = null;
     string? publicRoot = null;
     var docker = false;
+    var codexExecute = false;
     var fileScale = 100_000;
     for (var index = 0; index < values.Length; index++)
     {
@@ -82,6 +86,9 @@ static VerificationOptions Parse(string[] values)
             case "--docker":
                 docker = true;
                 break;
+            case "--codex-execute":
+                codexExecute = true;
+                break;
             case "--file-scale" when index + 1 < values.Length && int.TryParse(values[++index], out var parsed):
                 fileScale = parsed;
                 break;
@@ -94,5 +101,5 @@ static VerificationOptions Parse(string[] values)
         throw new ArgumentException("Verification root or file scale is invalid");
     }
 
-    return new VerificationOptions(scenario, repository, output, publicRoot, docker, fileScale);
+    return new VerificationOptions(scenario, repository, output, publicRoot, docker, codexExecute, fileScale);
 }

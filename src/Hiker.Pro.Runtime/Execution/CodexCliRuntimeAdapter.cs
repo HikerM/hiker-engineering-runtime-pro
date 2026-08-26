@@ -157,7 +157,14 @@ public sealed class CodexCliRuntimeAdapter : IExecutionRuntimeAdapter, IAsyncDis
         var path = EventPath(request);
         if (!File.Exists(path)) return Array.Empty<RuntimeCollectedEvent>();
         var values = new List<RuntimeCollectedEvent>();
-        using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            4096,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         while (values.Count < 256 && await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
         {
             try
@@ -214,8 +221,18 @@ public sealed class CodexCliRuntimeAdapter : IExecutionRuntimeAdapter, IAsyncDis
     private async Task<RuntimeHandle> LaunchAsync(RuntimeHandle handle, string? sessionId, CancellationToken cancellationToken)
     {
         var request = Plan(handle.RuntimeId);
-        if (_active.TryGetValue(handle.RuntimeId, out var existing) && !existing.Process.HasExited)
-            throw new InvalidOperationException("Codex runtime already has an active process");
+        if (_active.TryGetValue(handle.RuntimeId, out var existing))
+        {
+            if (!existing.Process.HasExited)
+            {
+                throw new InvalidOperationException("Codex runtime already has an active process");
+            }
+
+            if (_active.TryRemove(handle.RuntimeId, out var completed))
+            {
+                await StopProcessAsync(completed, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
         var prompt = sessionId is null
             ? await ReadInputAsync(request, cancellationToken).ConfigureAwait(false)
             : "Continue from the latest durable Hiker checkpoint. Reconcile the current state generation before writing and do not replay completed operations.";
@@ -236,10 +253,10 @@ public sealed class CodexCliRuntimeAdapter : IExecutionRuntimeAdapter, IAsyncDis
             start.ArgumentList.Add("resume");
         }
         start.ArgumentList.Add("--json");
-        start.ArgumentList.Add("--color");
-        start.ArgumentList.Add("never");
         if (sessionId is null)
         {
+            start.ArgumentList.Add("--color");
+            start.ArgumentList.Add("never");
             start.ArgumentList.Add("-s");
             start.ArgumentList.Add(_options.Sandbox);
             start.ArgumentList.Add("-C");

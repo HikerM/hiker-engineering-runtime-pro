@@ -38,7 +38,7 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 
 State Plane 已具备真实 SQLite/WAL、短事务 CAS、operation 幂等、依赖边原子提交、语义事件冲突检测、内容寻址 Artifact、Doctor、保守 GC、可验证备份/恢复，以及 Community 5.18 `.ai` 状态的白名单单向导入。
 
-Runtime 已建立 provider-neutral Adapter contract、Task/Agent/Lease/Ownership/Worktree 同代提交、PID+启动时间+可执行身份验证、最小交接包、崩溃恢复、两阶段资源释放、真实 Git Worktree 管理和 Codex CLI Adapter。Codex Adapter 的探测与挂起启动已验证；真实模型 Resume/Recover E2E 仍必须单独通过后才能归类为 Real Integration Proven。
+Runtime 已建立 provider-neutral Adapter contract、Task/Agent/Lease/Ownership/Worktree 同代提交、PID+启动时间+可执行身份验证、最小交接包、崩溃恢复、两阶段资源释放、真实 Git Worktree 管理和 Codex CLI Adapter。真实安装的 Codex 已完成 Task、隔离 Worktree、Checkpoint、同 Session Recover 与资源释放 E2E，归类为 `REAL_INTEGRATION_PROVEN`。
 
 Context Resolver、`hiker resume`、Intent/Dependency/Evidence Graph、50 服务语义拓扑、资源租约、SQLite 查询计划与并发证据、签名 Entitlement、设备激活、Offline Grace、签名 Module/Update、默认拒绝降级和签名回滚授权均已实现。
 

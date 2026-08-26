@@ -8,6 +8,7 @@ internal sealed record VerificationOptions(
     string OutputPath,
     string? PublicRepositoryRoot,
     bool DockerEnabled,
+    bool CodexExecuteEnabled,
     int FileScale);
 
 internal sealed record VerificationCheck(
