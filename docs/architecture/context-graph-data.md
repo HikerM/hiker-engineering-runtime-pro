@@ -12,6 +12,8 @@ The graph uses typed `dependency_edges`, not token or keyword matching. An impac
 
 Goal changes use a separate atomic coordinator. The model supplies a structured classification for every in-scope task: `AFFECTED`, `UNAFFECTED`, `SUPERSEDED`, or `REQUIRES_REVIEW`. Runtime validation rejects duplicate tasks, missing task facts, evidence that is not linked by `PROVEN_BY`, evidence invalidation outside `AFFECTED`, and skipped revisions. One State transaction then records the Goal Revision, updates task bindings, marks affected implementation/evidence stale, preserves unaffected evidence, retains superseded history, and leaves uncertain tasks explicitly awaiting review. `ADD`, `REMOVE`, `MODIFY`, `ARCHITECTURE`, `STACK_MIGRATION`, and `UNDO` all create a new immutable revision; undo never deletes history. Exact operation retries return the committed receipt instead of applying the change twice.
 
+Decision memory is structured rather than a free-form summary. Each decision records status, reason, source, scope, evidence, rejected alternatives and supersession. Rejected and user-rejected decisions remain bounded warm facts so a resumed agent can avoid repeating a settled alternative. Replacing a current decision commits the old `SUPERSEDED` fact, the new `APPROVED_CURRENT` fact, graph edges and `DECISION_SUPERSEDED` event in one CAS transaction.
+
 ## Service topology and resource leases
 
 Services register runtime/version/build facts, endpoints, datastores, queues, contracts, consumers, and service dependencies as State entities plus typed graph edges. This is runtime-neutral and can represent .NET, Node, Laravel/PHP, Java, Go, Python, Rust, Unity, Qt, or mixed systems without changing the State schema.

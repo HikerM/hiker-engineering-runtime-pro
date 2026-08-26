@@ -14,6 +14,7 @@ internal sealed class CommercialReleaseGate
         "OperationRetry_IsIdempotentAndPayloadConflictIsRejected",
         "PartialImpactPreservesUnaffectedFactsAndInvalidatesOnlyBoundEvidence",
         "ApiContractChangeInvalidatesConsumerEvidenceButNotDatabaseEvidence",
+        "RejectedDecisionRetainsReasonAndCurrentDecisionSupersedesAtomically",
         "Start_RejectsSecondWriterWhileLeaseIsActiveWithoutStartingAdapter",
         "Recovery_UsesValidatedCheckpointAndDoesNotReplayCompletedRecovery",
         "Completion_DrainsThenReleasesLeaseOwnershipAndWorktreeExactlyOnce",
