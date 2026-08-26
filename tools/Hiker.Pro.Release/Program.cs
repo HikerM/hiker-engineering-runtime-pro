@@ -22,14 +22,18 @@ try
         case "build":
             {
                 var root = Path.GetFullPath(ValueAfter("--root") ?? Directory.GetCurrentDirectory());
+                var keyFromStandardInput = args.Contains("--private-key-stdin", StringComparer.Ordinal)
+                    ? await Console.In.ReadToEndAsync().ConfigureAwait(false)
+                    : null;
                 var options = new ReleaseBuildOptions(
                     root,
                     Path.GetFullPath(ValueAfter("--output") ?? Path.Combine(root, "artifacts", "release")),
-                    Required("--private-key"),
+                    ValueAfter("--private-key"),
+                    keyFromStandardInput,
                     Required("--key-id"),
-                    ValueAfter("--runtime") ?? "win-x64",
-                    ValueAfter("--channel") ?? "rc",
-                    ValueAfter("--configuration") ?? "Release");
+                        ValueAfter("--runtime") ?? "win-x64",
+                        ValueAfter("--channel") ?? "rc",
+                        ValueAfter("--configuration") ?? "Release");
                 var result = await new ReleasePackageBuilder().BuildAsync(options).ConfigureAwait(false);
                 Console.WriteLine(JsonSerializer.Serialize(result, json));
                 return 0;

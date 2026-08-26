@@ -107,6 +107,18 @@ dotnet build -c Release
 dotnet test -c Release
 ```
 
+## 仓库结构
+
+| 路径 | 职责 |
+| --- | --- |
+| `src/Hiker.Pro.State` | SQLite/WAL 权威状态、CAS、事件、Artifact、Backup/Restore/Export |
+| `src/Hiker.Pro.Runtime` | Task、Lease、Worktree、Checkpoint、Recovery、Context、Graph 与商业信任边界 |
+| `src/Hiker.Pro.Cli` | 面向工程项目的薄 CLI 入口 |
+| `tools/Hiker.Pro.Verification` | 老化、规模、真实服务、Codex Runtime 与 COMM-G1–G17 验证 |
+| `tools/Hiker.Pro.Release` | 版本事实、签名 RC 构建、独立包校验与商业发布 Gate |
+| `tests/` | 单元、集成、故障注入与回归测试 |
+| `docs/` | 架构、Public/Pro 边界、证据分级与发布流程 |
+
 ## 可重复验证
 
 验证输出写入被 Git 忽略的 `artifacts/verification/`：
@@ -124,4 +136,24 @@ dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario codex
 
 完整证据边界和当前实测结果见 [5.19 Verification](docs/verification/5.19-verification.md)。
 
-RC 的签名构建、独立验证和最终聚合 Gate 见 [5.19 Release Process](docs/release/5.19-release-process.md)。私钥、签名密钥和真实商业 License 禁止进入 Git、Fixture、日志或发行包。
+## 商业 RC Gate
+
+RC 构建要求干净的 `main`。一次性验证密钥可通过标准输入传入，避免私钥落盘：
+
+```powershell
+openssl ecparam -name prime256v1 -genkey -noout | dotnet run --project tools/Hiker.Pro.Release -c Release -- build `
+  --root . --output artifacts/release --private-key-stdin --key-id <rc-key-id> --runtime win-x64 --channel rc
+
+dotnet run --project tools/Hiker.Pro.Release -c Release -- verify `
+  --package <rc-zip> --public-key <public-pem> --public-key-sha256 <pinned-fingerprint> `
+  --key-id <rc-key-id> --report artifacts/verification/release-package.json
+
+dotnet run --project tools/Hiker.Pro.Release -c Release -- gate `
+  --root . --public-root <community-5.18-root> `
+  --package-report artifacts/verification/release-package.json `
+  --report artifacts/verification/commercial-release-gate.json
+```
+
+`verify` 的 Clean Install 在隔离临时目录中执行，不安装或替换当前 Codex 插件。Gate 的唯一通过结果是 `PASS_5_19_COMMERCIAL`；任一事实缺失或不匹配均返回 `BLOCKED_5_19`。
+
+完整签名构建、独立信任根和聚合 Gate 说明见 [5.19 Release Process](docs/release/5.19-release-process.md)。私钥、签名密钥和真实商业 License 禁止进入 Git、Fixture、日志或发行包。

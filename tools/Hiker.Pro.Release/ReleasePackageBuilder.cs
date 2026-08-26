@@ -16,8 +16,7 @@ internal sealed class ReleasePackageBuilder
     {
         var root = Path.GetFullPath(options.RepositoryRoot);
         var outputRoot = Path.GetFullPath(options.OutputRoot);
-        var privateKeyPath = Path.GetFullPath(options.PrivateKeyPath);
-        RequireExternalPrivateKey(root, outputRoot, privateKeyPath);
+        var privateKeyPem = await ResolvePrivateKeyAsync(root, outputRoot, options, cancellationToken).ConfigureAwait(false);
         var versions = await RepositoryVersionReader.ReadAndValidateAsync(root, cancellationToken).ConfigureAwait(false);
         var status = await ProcessRunner.RequireAsync("git", root, new[] { "status", "--porcelain=v1", "--untracked-files=all" }, TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(status.StandardOutput))
@@ -89,11 +88,9 @@ internal sealed class ReleasePackageBuilder
             var manifestPath = Path.Combine(stage, "manifest.json");
             string publicPem;
             string publicFingerprint;
-            await using (var privateKey = File.OpenRead(privateKeyPath))
-            using (var reader = new StreamReader(privateKey, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: false))
             using (var key = ECDsa.Create())
             {
-                key.ImportFromPem(await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false));
+                key.ImportFromPem(privateKeyPem);
                 if (key.KeySize != 256) throw new CryptographicException("Release signing key must use ECDSA P-256");
                 var payload = CanonicalJson.Serialize(manifest);
                 var envelope = new SignedEnvelope(
@@ -194,13 +191,23 @@ internal sealed class ReleasePackageBuilder
         }
     }
 
-    private static void RequireExternalPrivateKey(string repositoryRoot, string outputRoot, string keyPath)
+    private static async Task<string> ResolvePrivateKeyAsync(
+        string repositoryRoot,
+        string outputRoot,
+        ReleaseBuildOptions options,
+        CancellationToken cancellationToken)
     {
+        if ((options.PrivateKeyPath is null) == (options.PrivateKeyPem is null))
+            throw new InvalidOperationException("Provide exactly one external private-key source: path or standard input");
+        if (options.PrivateKeyPem is { Length: > 0 } standardInput)
+            return standardInput;
+        var keyPath = Path.GetFullPath(options.PrivateKeyPath!);
         if (!File.Exists(keyPath)) throw new FileNotFoundException("Release signing private key was not found", keyPath);
         if (IsWithin(repositoryRoot, keyPath) || IsWithin(outputRoot, keyPath))
         {
             throw new InvalidOperationException("Release signing private key must remain outside the repository and release output");
         }
+        return await File.ReadAllTextAsync(keyPath, cancellationToken).ConfigureAwait(false);
     }
 
     private static bool IsWithin(string root, string path)

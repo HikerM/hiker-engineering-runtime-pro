@@ -10,7 +10,8 @@ internal sealed record RepositoryVersionFacts(
 internal sealed record ReleaseBuildOptions(
     string RepositoryRoot,
     string OutputRoot,
-    string PrivateKeyPath,
+    string? PrivateKeyPath,
+    string? PrivateKeyPem,
     string KeyId,
     string RuntimeIdentifier,
     string Channel,
