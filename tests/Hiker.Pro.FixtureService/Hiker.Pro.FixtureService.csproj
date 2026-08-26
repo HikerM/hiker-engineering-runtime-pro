@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <AssemblyName>Hiker.Pro.FixtureService</AssemblyName>
+    <RootNamespace>Hiker.Pro.FixtureService</RootNamespace>
+  </PropertyGroup>
+</Project>

@@ -61,7 +61,10 @@ public sealed record SignedUpdateManifest(
     string Channel,
     string MinimumRuntimeVersion,
     DateTimeOffset PublishedAt,
-    IReadOnlyList<UpdateArtifact> Artifacts);
+    IReadOnlyList<UpdateArtifact> Artifacts,
+    IReadOnlyList<string>? RollbackFromVersions = null);
+
+public sealed record UpdatePolicyDecision(bool Allowed, string Status);
 
 public sealed record SignedModuleManifest(
     string ModuleId,

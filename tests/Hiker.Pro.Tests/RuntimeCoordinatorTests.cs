@@ -3,6 +3,7 @@ using Hiker.Pro.Artifacts;
 using Hiker.Pro.Diagnostics;
 using Hiker.Pro.State;
 using Hiker.Pro.Workspace;
+using System.Text.Json;
 using Xunit;
 
 namespace Hiker.Pro.Tests;
@@ -287,6 +288,71 @@ public sealed class RuntimeCoordinatorTests
         await adapter.ShutdownAsync(handle);
     }
 
+    [Fact]
+    public async Task FaultAfterLeaseReservation_LeavesSingleRecoverableWriterFact()
+    {
+        await using var project = await TestProject.CreateAsync();
+        var adapter = new TestRuntimeAdapter("fault-after-reserve") { FailResume = true };
+        var coordinator = new RuntimeCoordinator(project.Store, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.StartAsync("fault-reserve", Start(project.Root, "runtime-fault"), adapter));
+        var leaseState = await project.Store.ReadAsync(new StateKey("project-1", EntityKinds.RuntimeLease, "task-1"));
+        var ownershipState = await project.Store.ReadAsync(new StateKey("project-1", EntityKinds.Ownership, "task-1"));
+        Assert.NotNull(leaseState);
+        Assert.Equal(leaseState?.Generation, ownershipState?.Generation);
+        Assert.Equal("RESERVED", PayloadValue(leaseState!, "status"));
+        Assert.Equal("runtime-fault", PayloadValue(ownershipState!, "writer_runtime_id"));
+        var contender = new TestRuntimeAdapter("contender");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.StartAsync("fault-contender", Start(project.Root, "runtime-contender"), contender));
+        Assert.Equal(0, contender.StartCalls);
+    }
+
+    [Fact]
+    public async Task FaultDuringHandoffRecovery_DoesNotCreateSecondWriterOrReplayTransfer()
+    {
+        await using var project = await TestProject.CreateAsync();
+        var inspector = new TestWorkspaceInspector(project.Root);
+        var sourceAdapter = new TestRuntimeAdapter("source");
+        var started = await new RuntimeCoordinator(project.Store, inspector, new ProcessIdentityProbe())
+            .StartAsync("fault-handoff-source", Start(project.Root, "runtime-source"), sourceAdapter);
+        var targetAdapter = new TestRuntimeAdapter("target") { FailRecover = true };
+        var coordinator = new HandoffCoordinator(project.Store, new ContentAddressedArtifactStore(project.Layout, project.Store), inspector);
+        var request = new HandoffRequest(
+            "fault-handoff", "project-1", "task-1", started.Handle, sourceAdapter, targetAdapter,
+            "runtime-target", "worktree-task-1", project.Root, 1, "source-1",
+            new[] { "state://goal/current" }, new[] { "AC-1" });
+        var failed = await coordinator.HandoffAsync(request);
+        Assert.Equal("RECOVERY_REQUIRED", failed.Status);
+        var ownership = await project.Store.ReadAsync(new StateKey("project-1", EntityKinds.Ownership, "task-1"));
+        var lease = await project.Store.ReadAsync(new StateKey("project-1", EntityKinds.RuntimeLease, "task-1"));
+        Assert.Equal("runtime-target", PayloadValue(ownership!, "writer_runtime_id"));
+        Assert.Equal("runtime-target", PayloadValue(lease!, "runtime_id"));
+        Assert.Equal(1, targetAdapter.RecoverCalls);
+        var replay = await coordinator.HandoffAsync(request);
+        Assert.Equal("RECOVERY_REQUIRED", replay.Status);
+        Assert.Equal(1, targetAdapter.RecoverCalls);
+    }
+
+    [Fact]
+    public async Task FaultDuringFinalRelease_StaysDrainingAndCannotDuplicateCompletion()
+    {
+        await using var project = await TestProject.CreateAsync();
+        var adapter = new TestRuntimeAdapter("release-fault") { FailShutdown = true };
+        var started = await new RuntimeCoordinator(project.Store, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe())
+            .StartAsync("fault-release-source", Start(project.Root, "runtime-release"), adapter);
+        var coordinator = new RuntimeLifecycleCoordinator(project.Store);
+        var request = new RuntimeCompletionRequest(
+            "fault-release", "project-1", "task-1", "worktree-task-1", started.Handle,
+            adapter, RuntimeLifecycle.Completed, 1, "source-1");
+        var failed = await coordinator.CompleteAsync(request);
+        Assert.Equal("RECOVERY_REQUIRED", failed.Status);
+        var lease = await project.Store.ReadAsync(new StateKey("project-1", EntityKinds.RuntimeLease, "task-1"));
+        Assert.Equal("DRAINING", PayloadValue(lease!, "status"));
+        var retry = await coordinator.CompleteAsync(request);
+        Assert.Equal("RECOVERY_REQUIRED", retry.Status);
+        Assert.Equal(1, adapter.ShutdownCalls);
+        Assert.Null(await project.Store.ReadOperationReceiptAsync("fault-release:release"));
+    }
+
     private static RuntimeStartRequest Start(
         string root,
         string runtimeId,
@@ -303,6 +369,12 @@ public sealed class RuntimeCoordinatorTests
         "source-1",
         WorktreeId: worktreeId,
         PredictedAffectedScopes: new[] { scope });
+
+    private static string? PayloadValue(StateSnapshot snapshot, string name)
+    {
+        using var document = JsonDocument.Parse(snapshot.PayloadJson);
+        return document.RootElement.GetProperty(name).GetString();
+    }
 }
 
 internal sealed class TestWorkspaceInspector(string root, string fingerprint = "workspace-1") : IWorkspaceInspector
@@ -323,6 +395,9 @@ internal sealed class TestRuntimeAdapter(string adapterId) : IExecutionRuntimeAd
     public int RecoverCalls { get; private set; }
     public int ShutdownCalls { get; private set; }
     public RuntimeProcessIdentity? ProcessIdentity { get; init; }
+    public bool FailResume { get; init; }
+    public bool FailRecover { get; init; }
+    public bool FailShutdown { get; init; }
 
     public Task<RuntimeHandle> StartAsync(RuntimeStartRequest request, CancellationToken cancellationToken = default)
     {
@@ -334,6 +409,7 @@ internal sealed class TestRuntimeAdapter(string adapterId) : IExecutionRuntimeAd
     public Task<RuntimeHandle> ResumeAsync(RuntimeHandle handle, CancellationToken cancellationToken = default)
     {
         ResumeCalls++;
+        if (FailResume) throw new InvalidOperationException("Injected resume failure");
         _states[handle.RuntimeId] = RuntimeLifecycle.Running;
         return Task.FromResult(handle with { Lifecycle = RuntimeLifecycle.Running });
     }
@@ -373,6 +449,7 @@ internal sealed class TestRuntimeAdapter(string adapterId) : IExecutionRuntimeAd
     public Task<RuntimeHandle> RecoverAsync(RuntimeRecoveryRequest request, CancellationToken cancellationToken = default)
     {
         RecoverCalls++;
+        if (FailRecover) throw new InvalidOperationException("Injected recovery failure");
         _states[request.PriorHandle.RuntimeId] = RuntimeLifecycle.Running;
         return Task.FromResult(request.PriorHandle with { Lifecycle = RuntimeLifecycle.Running });
     }
@@ -380,6 +457,7 @@ internal sealed class TestRuntimeAdapter(string adapterId) : IExecutionRuntimeAd
     public Task ShutdownAsync(RuntimeHandle handle, CancellationToken cancellationToken = default)
     {
         ShutdownCalls++;
+        if (FailShutdown) throw new InvalidOperationException("Injected shutdown failure");
         _states[handle.RuntimeId] = RuntimeLifecycle.Completed;
         return Task.CompletedTask;
     }

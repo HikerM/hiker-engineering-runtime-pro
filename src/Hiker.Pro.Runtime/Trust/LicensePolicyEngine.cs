@@ -64,6 +64,36 @@ public sealed class LicensePolicyEngine(
         update.PublishedAt <= entitlement.UpdatesUntil &&
         SemanticVersion.InRange(update.Version, entitlement.MinimumVersion, entitlement.MaximumVersion);
 
+    public UpdatePolicyDecision EvaluateUpdate(
+        CommercialEntitlement entitlement,
+        SignedUpdateManifest update,
+        string installedVersion)
+    {
+        if (update.PublishedAt > entitlement.UpdatesUntil)
+        {
+            return new UpdatePolicyDecision(false, "UPDATE_WINDOW_EXPIRED");
+        }
+        if (!SemanticVersion.InRange(update.Version, entitlement.MinimumVersion, entitlement.MaximumVersion))
+        {
+            return new UpdatePolicyDecision(false, "VERSION_NOT_ENTITLED");
+        }
+
+        var comparison = SemanticVersion.Compare(update.Version, installedVersion);
+        if (comparison > 0)
+        {
+            return new UpdatePolicyDecision(true, "UPDATE_ALLOWED");
+        }
+        if (comparison == 0)
+        {
+            return new UpdatePolicyDecision(false, "ALREADY_INSTALLED");
+        }
+
+        var signedRollback = update.RollbackFromVersions?.Contains(installedVersion, StringComparer.Ordinal) == true;
+        return signedRollback
+            ? new UpdatePolicyDecision(true, "SIGNED_ROLLBACK_ALLOWED")
+            : new UpdatePolicyDecision(false, "ROLLBACK_BLOCKED");
+    }
+
     public static string FingerprintInstallationPublicKey(ReadOnlySpan<byte> subjectPublicKeyInfo) =>
         Convert.ToHexString(SHA256.HashData(subjectPublicKeyInfo)).ToLowerInvariant();
 

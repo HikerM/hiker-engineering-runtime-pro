@@ -34,11 +34,25 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 - [Context, Graph, Services, and Data Performance](docs/architecture/context-graph-data.md)
 - [Commercial Trust Architecture](docs/architecture/commercial-trust.md)
 
-## 已实现的首个垂直切片
+## 当前实现状态
 
-当前 State Plane 切片已具备真实 SQLite/WAL、短事务 CAS、operation 幂等、依赖边原子提交、语义事件冲突检测、内容寻址 Artifact、Doctor、保守 GC、可验证备份/恢复，以及 Community 5.18 `.ai` 状态的白名单单向导入。它仍是开发基线，不代表完整 5.19 Runtime 或商业发布就绪。
+State Plane 已具备真实 SQLite/WAL、短事务 CAS、operation 幂等、依赖边原子提交、语义事件冲突检测、内容寻址 Artifact、Doctor、保守 GC、可验证备份/恢复，以及 Community 5.18 `.ai` 状态的白名单单向导入。
 
-Runtime 切片已建立 provider-neutral Adapter contract、Task/Agent/Lease/Ownership/Worktree 同代提交、PID+启动时间+可执行身份验证、最小交接包、崩溃恢复和两阶段资源释放。Codex 实机 Adapter、长期老化、商业信任链及完整发布门禁仍未完成。
+Runtime 已建立 provider-neutral Adapter contract、Task/Agent/Lease/Ownership/Worktree 同代提交、PID+启动时间+可执行身份验证、最小交接包、崩溃恢复、两阶段资源释放、真实 Git Worktree 管理和 Codex CLI Adapter。Codex Adapter 的探测与挂起启动已验证；真实模型 Resume/Recover E2E 仍必须单独通过后才能归类为 Real Integration Proven。
+
+Context Resolver、`hiker resume`、Intent/Dependency/Evidence Graph、50 服务语义拓扑、资源租约、SQLite 查询计划与并发证据、签名 Entitlement、设备激活、Offline Grace、签名 Module/Update、默认拒绝降级和签名回滚授权均已实现。
+
+验证工具已覆盖：
+
+- 12 个月加速老化：1201 Task、120 Goal Revision、120 Handoff、60 Crash；
+- 1/2/4/8 Worker 的真实 SQLite/WAL CAS 竞争；
+- 100k 非空语义文件与真实 Git add/commit/delta；
+- 5 个隔离可执行 HTTP 服务；
+- PostgreSQL 16.14、100k 行 before/after 与 8 客户端并发；
+- COMM-G1/G2/G3/G16/G17 公私边界和热路径成本；
+- 状态、Handoff、Artifact、Migration、Release 的故障注入。
+
+这些结果分别属于 `DETERMINISTIC_VERIFIED`、`SIMULATION_PROVEN` 或 `REAL_INTEGRATION_PROVEN`；不等于客户现场长期运行。当前仍是开发基线，不代表完整 5.19 商业发布就绪。
 
 ```powershell
 dotnet run --project src/Hiker.Pro.Cli -- init --root <project>
@@ -54,5 +68,18 @@ dotnet restore
 dotnet build -c Release
 dotnet test -c Release
 ```
+
+## 可重复验证
+
+验证输出写入被 Git 忽略的 `artifacts/verification/`：
+
+```powershell
+dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario state-aging --root .
+dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario large-repository --root . --file-scale 100000
+dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario real-services --root . --docker
+dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario commercial --root . --public-root <community-5.18-root>
+```
+
+完整证据边界和当前实测结果见 [5.19 Verification](docs/verification/5.19-verification.md)。
 
 私钥、签名密钥和真实商业License禁止进入Git、Fixture、日志或发行包。

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Hiker.Pro.State;
 using Hiker.Pro.Trust;
 using Xunit;
 
@@ -80,6 +81,12 @@ public sealed class TrustTests
         var update = new SignedUpdateManifest("Hiker", "5.19.2", "stable", "0.1.0", issued.AddDays(20), Array.Empty<UpdateArtifact>());
         Assert.True(graceEngine.CanInstallUpdate(entitlement, update));
         Assert.False(graceEngine.CanInstallUpdate(entitlement, update with { PublishedAt = issued.AddDays(31) }));
+        Assert.Equal("UPDATE_ALLOWED", graceEngine.EvaluateUpdate(entitlement, update, "5.19.1").Status);
+        Assert.Equal("ROLLBACK_BLOCKED", graceEngine.EvaluateUpdate(entitlement, update with { Version = "5.19.0" }, "5.19.1").Status);
+        var signedRollback = update with { Version = "5.19.0", RollbackFromVersions = new[] { "5.19.1" } };
+        var rollbackDecision = graceEngine.EvaluateUpdate(entitlement, signedRollback, "5.19.1");
+        Assert.True(rollbackDecision.Allowed);
+        Assert.Equal("SIGNED_ROLLBACK_ALLOWED", rollbackDecision.Status);
     }
 
     [Fact]
@@ -117,6 +124,51 @@ public sealed class TrustTests
         var moduleResult = await verifier.VerifyModuleAsync(Sign(module, "module", TrustPurposes.Module, moduleKey), runtimePath,
             new HashSet<string>(new[] { "data-performance" }, StringComparer.Ordinal), "5.19.0");
         Assert.Equal("VERIFIED", moduleResult.Status);
+        await File.WriteAllTextAsync(runtimePath, "tampered-module");
+        var tamperedModule = await verifier.VerifyModuleAsync(Sign(module, "module", TrustPurposes.Module, moduleKey), runtimePath,
+            new HashSet<string>(new[] { "data-performance" }, StringComparer.Ordinal), "5.19.0");
+        Assert.Equal("BLOCKED", tamperedModule.Status);
+    }
+
+    [Fact]
+    public async Task RecoveryOnlyLicense_AllowsRealStateReadBackupAndExportSurface()
+    {
+        await using var project = await TestProject.CreateAsync();
+        var now = DateTimeOffset.UtcNow;
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var trust = new[]
+        {
+            PublicKey("ent", TrustPurposes.Entitlement, key, now),
+            PublicKey("act", TrustPurposes.Activation, key, now)
+        };
+        var entitlement = new CommercialEntitlement(
+            "license", "PRO", new[] { "runtime" }, "5.19.0", "5.19.9", 1,
+            now.AddDays(-20), now.AddDays(-10), now.AddDays(-10), 1, Hash("account"));
+        var installation = Hash("install");
+        var device = Hash("device");
+        var activation = new DeviceActivationCertificate("activation", "license", installation, device, 1, now.AddDays(-20), now.AddDays(10));
+        var engine = new LicensePolicyEngine(new SignedEnvelopeVerifier(trust), TimeProvider.System);
+        var decision = engine.Evaluate(
+            Sign(entitlement, "ent", TrustPurposes.Entitlement, key),
+            Sign(activation, "act", TrustPurposes.Activation, key),
+            "5.19.0",
+            installation,
+            device,
+            new TrustClockState(now, null, "offline"));
+        Assert.Equal(LicenseMode.RecoveryOnly, decision.Mode);
+        Assert.True(decision.DataRecoveryAllowed);
+        Assert.True(decision.StateExportAllowed);
+        var request = new TransactionRequest(
+            "license-recovery-state",
+            new StateMutation(
+                new StateKey("project-1", EntityKinds.Task, "task-1"), 0, 1, StateLifecycle.Valid,
+                "STATE_COORDINATOR", "3.0.0", "source", "deps", "{\"status\":\"SAFE\"}"),
+            "TASK_CREATED", "TASK_CREATED", "{}");
+        Assert.True((await project.Store.CompareAndSwapAsync(request)).Committed);
+        var backup = await new StateBackupService(project.Layout).CreateAsync();
+        Assert.True(File.Exists(backup.BackupPath));
+        Assert.Equal("SAFE", System.Text.Json.JsonDocument.Parse((await project.Store.ReadAsync(request.Mutation.Key))!.PayloadJson)
+            .RootElement.GetProperty("status").GetString());
     }
 
     [Fact]
