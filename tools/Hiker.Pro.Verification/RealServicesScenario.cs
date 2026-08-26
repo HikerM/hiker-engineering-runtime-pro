@@ -161,8 +161,8 @@ internal sealed class RealServicesScenario(VerificationOptions options)
             created = true;
             for (var attempt = 0; attempt < 60; attempt++)
             {
-                var ready = await DockerAsync(container, "pg_isready", "-U", "postgres", "-d", "hiker_fixture").ConfigureAwait(false);
-                if (ready.ExitCode == 0)
+                var ready = await PsqlAsync(container, "SELECT 1;").ConfigureAwait(false);
+                if (ready.ExitCode == 0 && ready.StandardOutput.Trim() == "1")
                 {
                     break;
                 }
