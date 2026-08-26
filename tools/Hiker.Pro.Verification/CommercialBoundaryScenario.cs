@@ -3,12 +3,11 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Hiker.Pro.Trust;
 
 namespace Hiker.Pro.Verification;
 
-internal sealed partial class CommercialBoundaryScenario(VerificationOptions options)
+internal sealed class CommercialBoundaryScenario(VerificationOptions options)
 {
     private static readonly string[] ProMarkers =
     {
@@ -89,7 +88,7 @@ internal sealed partial class CommercialBoundaryScenario(VerificationOptions opt
                 continue;
             }
             var name = Path.GetFileName(relative);
-            if (PrivateKeyName().IsMatch(name))
+            if (SensitiveContentPolicy.IsPrivateKeyFileName(name))
             {
                 findings.Add($"PRIVATE_KEY_NAME:{relative}");
                 continue;
@@ -105,9 +104,9 @@ internal sealed partial class CommercialBoundaryScenario(VerificationOptions opt
                 continue;
             }
             var content = Encoding.UTF8.GetString(bytes);
-            if (PrivateKeyContent().IsMatch(content)) findings.Add($"PRIVATE_KEY_CONTENT:{relative}");
-            if (CredentialToken().IsMatch(content)) findings.Add($"CREDENTIAL_TOKEN:{relative}");
-            if (ContainsConcreteDeveloperHome(content)) findings.Add($"DEVELOPER_HOME:{relative}");
+            if (SensitiveContentPolicy.ContainsPrivateKey(content)) findings.Add($"PRIVATE_KEY_CONTENT:{relative}");
+            if (SensitiveContentPolicy.ContainsCredentialToken(content)) findings.Add($"CREDENTIAL_TOKEN:{relative}");
+            if (SensitiveContentPolicy.ContainsConcreteDeveloperHome(content)) findings.Add($"DEVELOPER_HOME:{relative}");
             if (includeProMarkers && ProMarkers.Any(marker => content.Contains(marker, StringComparison.Ordinal)))
             {
                 findings.Add($"PRO_SOURCE_MARKER:{relative}");
@@ -233,32 +232,6 @@ internal sealed partial class CommercialBoundaryScenario(VerificationOptions opt
     private static string Encode(ReadOnlySpan<byte> value) => Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     private static VerificationCheck Check(string id, string status, string detail) => new(id, status, "DETERMINISTIC_VERIFIED", detail, new Dictionary<string, object?>());
-
-    private static bool ContainsConcreteDeveloperHome(string content)
-    {
-        foreach (Match match in DeveloperHome().Matches(content))
-        {
-            if (!match.Value.Contains('<') && !match.Value.Contains('>') &&
-                !match.Value.Contains('%') && !match.Value.Contains('$') &&
-                !match.Value.Contains('{') && !match.Value.Contains('}'))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    [GeneratedRegex("(^|[._-])(private|signing)[._-]?(key)?\\.(pem|key|p8|p12|pfx)$", RegexOptions.IgnoreCase)]
-    private static partial Regex PrivateKeyName();
-
-    [GeneratedRegex("-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----")]
-    private static partial Regex PrivateKeyContent();
-
-    [GeneratedRegex("(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})")]
-    private static partial Regex CredentialToken();
-
-    [GeneratedRegex("([A-Za-z]:\\\\Users\\\\[^\\\\\"']+|/home/[^/\\s\"']+|/Users/[^/\\s\"']+)", RegexOptions.IgnoreCase)]
-    private static partial Regex DeveloperHome();
 
     private sealed record RepositoryMetadata(string Name, bool Private, string Visibility, string DefaultBranch);
     private sealed record LicensePerformance(int Count, double P50Ms, double P95Ms, double P99Ms);

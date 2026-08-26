@@ -2,12 +2,11 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Hiker.Pro.Trust;
 
 namespace Hiker.Pro.ReleaseTool;
 
-internal sealed partial class ReleasePackageVerifier
+internal sealed class ReleasePackageVerifier
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -174,9 +173,9 @@ internal sealed partial class ReleasePackageVerifier
             var info = new FileInfo(path);
             if (info.Length > 64 * 1024 * 1024) continue;
             var content = Encoding.Latin1.GetString(File.ReadAllBytes(path));
-            if (PrivateKeyContent().IsMatch(content)) findings.Add($"PRIVATE_KEY:{relative}");
-            if (CredentialToken().IsMatch(content)) findings.Add($"TOKEN:{relative}");
-            if (DeveloperHome().IsMatch(content)) findings.Add($"DEVELOPER_HOME:{relative}");
+            if (SensitiveContentPolicy.ContainsPrivateKey(content)) findings.Add($"PRIVATE_KEY:{relative}");
+            if (SensitiveContentPolicy.ContainsCredentialToken(content)) findings.Add($"TOKEN:{relative}");
+            if (SensitiveContentPolicy.ContainsConcreteDeveloperHome(content)) findings.Add($"DEVELOPER_HOME:{relative}");
         }
 
         return new ReleaseGateCheck(
@@ -277,15 +276,6 @@ internal sealed partial class ReleasePackageVerifier
 
     private static bool FixedEquals(string left, string right) => left.Length == right.Length &&
         CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(left.ToLowerInvariant()), Encoding.ASCII.GetBytes(right.ToLowerInvariant()));
-
-    [GeneratedRegex("-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----")]
-    private static partial Regex PrivateKeyContent();
-
-    [GeneratedRegex("(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})")]
-    private static partial Regex CredentialToken();
-
-    [GeneratedRegex("([A-Za-z]:\\\\[U]sers\\\\[^\\\\\"']+|/[h]ome/[^/\\s\"']+|/[U]sers/[^/\\s\"']+)", RegexOptions.IgnoreCase)]
-    private static partial Regex DeveloperHome();
 
     private sealed record PackageVersions(string Product, string Runtime, string StateSchema);
 }

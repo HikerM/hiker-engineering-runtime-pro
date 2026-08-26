@@ -218,6 +218,20 @@ public sealed class TrustTests
         Assert.Null(result.Payload);
     }
 
+    [Fact]
+    public void SensitiveContentPolicy_DetectsDirectAndEscapedHomesWithoutFlaggingProductIdentifiers()
+    {
+        var windowsHome = "C:\\" + "Users\\account\\project";
+        var escapedWindowsHome = "{\"path\":\"C:\\\\" + "Users\\\\account\\\\project\"}";
+        var unixHome = "/" + "home/account/project";
+
+        Assert.True(SensitiveContentPolicy.ContainsConcreteDeveloperHome(windowsHome));
+        Assert.True(SensitiveContentPolicy.ContainsConcreteDeveloperHome(escapedWindowsHome));
+        Assert.True(SensitiveContentPolicy.ContainsConcreteDeveloperHome(unixHome));
+        Assert.False(SensitiveContentPolicy.ContainsConcreteDeveloperHome("Hiker hikerctl HIKER_CONTROL_TASK"));
+        Assert.False(SensitiveContentPolicy.ContainsConcreteDeveloperHome("C:\\" + "Users\\<account>\\project"));
+    }
+
     private static TrustKey PublicKey(string keyId, string purpose, ECDsa key, DateTimeOffset now) => new(
         keyId,
         purpose,
