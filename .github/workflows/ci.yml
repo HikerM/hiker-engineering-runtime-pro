@@ -1,0 +1,32 @@
+name: private-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - name: Restore
+        run: dotnet restore Hiker.Pro.slnx
+      - name: Version facts
+        run: dotnet run --project tools/Hiker.Pro.Release -c Release --no-restore -- version-check --root .
+      - name: Format
+        run: dotnet format Hiker.Pro.slnx --verify-no-changes --no-restore
+      - name: Build
+        run: dotnet build Hiker.Pro.slnx -c Release --no-restore
+      - name: Test
+        run: dotnet test Hiker.Pro.slnx -c Release --no-build
+      - name: Commercial deterministic gates
+        run: dotnet run --project tools/Hiker.Pro.Verification -c Release --no-build -- --scenario commercial-security --root .

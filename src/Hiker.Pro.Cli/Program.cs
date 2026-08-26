@@ -4,6 +4,7 @@ using Hiker.Pro.Diagnostics;
 using Hiker.Pro.Execution;
 using Hiker.Pro.Context;
 using Hiker.Pro.State;
+using Hiker.Pro.Release;
 
 var options = new JsonSerializerOptions
 {
@@ -14,13 +15,14 @@ var options = new JsonSerializerOptions
 
 if (args.Length == 0 || args[0] is "help" or "--help" or "-h")
 {
-    Console.WriteLine("hiker <init|doctor|status|resume|version|backup|restore|migrate-community> [--root <project>]");
+    Console.WriteLine("hiker <init|doctor|status|resume|version|backup|restore|export|migrate-community> [--root <project>]");
     return 0;
 }
 
 if (args[0] == "version")
 {
-    Console.WriteLine("5.19.0-dev.1 runtime/0.1.0 schema/3.0.0");
+    var version = BuildVersionFacts.Current;
+    Console.WriteLine($"{version.Product} runtime/{version.Runtime} schema/{version.StateSchema}");
     return 0;
 }
 
@@ -91,6 +93,12 @@ try
             var restore = await new StateBackupService(layout).RestoreAsync(backupPath).ConfigureAwait(false);
             Console.WriteLine(JsonSerializer.Serialize(restore, options));
             return 0;
+        case "export":
+            await store.InitializeAsync().ConfigureAwait(false);
+            var exportProject = ValueAfter(args, "--project-id") ?? throw new ArgumentException("export requires --project-id <stable id>");
+            var export = await store.ExportAsync(exportProject, ValueAfter(args, "--output")).ConfigureAwait(false);
+            Console.WriteLine(JsonSerializer.Serialize(export, options));
+            return 0;
         case "migrate-community":
             await store.InitializeAsync().ConfigureAwait(false);
             var projectId = ValueAfter(args, "--project-id") ?? throw new ArgumentException("migrate-community requires --project-id <stable id>");
@@ -129,5 +137,5 @@ static async Task<string> FileSha256Async(string path)
 
 internal static class SqliteSchemaVersion
 {
-    public const string Value = "3.0.0";
+    public static string Value => BuildVersionFacts.Current.StateSchema;
 }

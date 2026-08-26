@@ -5,4 +5,5 @@
   <Project Path="tests/Hiker.Pro.FixtureService/Hiker.Pro.FixtureService.csproj" />
   <Project Path="tools/Hiker.Pro.Issuer/Hiker.Pro.Issuer.csproj" />
   <Project Path="tools/Hiker.Pro.Verification/Hiker.Pro.Verification.csproj" />
+  <Project Path="tools/Hiker.Pro.Release/Hiker.Pro.Release.csproj" />
 </Solution>

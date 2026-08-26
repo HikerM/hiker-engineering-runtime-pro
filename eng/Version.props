@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <HikerProductVersion>5.19.0-rc.1</HikerProductVersion>
+    <HikerRuntimeVersion>0.1.0</HikerRuntimeVersion>
+    <HikerStateSchemaVersion>3.0.0</HikerStateSchemaVersion>
+    <Version>$(HikerProductVersion)</Version>
+    <AssemblyVersion>5.19.0.0</AssemblyVersion>
+    <FileVersion>5.19.0.0</FileVersion>
+    <InformationalVersion>$(HikerProductVersion)</InformationalVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="HikerProductVersion" Value="$(HikerProductVersion)" />
+    <AssemblyMetadata Include="HikerRuntimeVersion" Value="$(HikerRuntimeVersion)" />
+    <AssemblyMetadata Include="HikerStateSchemaVersion" Value="$(HikerStateSchemaVersion)" />
+  </ItemGroup>
+</Project>

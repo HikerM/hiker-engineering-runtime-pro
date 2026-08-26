@@ -2,7 +2,7 @@
 
 Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运行时。它扩展公开的 Hiker Community 5.18，但商业源码、状态协调器、运行时调度、上下文解析、工程图谱、性能引擎和信任体系只存在于本私有仓库。
 
-当前阶段：`DEVELOPMENT`。当前代码和证据是 5.19 开发基线，不是正式发布包；在全部商业发布门禁通过前，不宣称 `PASS_5_19_COMMERCIAL`。
+当前阶段：`RELEASE_CANDIDATE`。当前代码是 5.19 商业候选，不是最终正式发布；是否达到 `PASS_5_19_COMMERCIAL` 必须由同一提交上的完整商业 Gate 证明。
 
 ## 不变量
 
@@ -17,7 +17,7 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 
 | 项目 | 当前值 |
 | --- | --- |
-| Pro 产品版本 | `5.19.0-dev.1` |
+| Pro 产品版本 | `5.19.0-rc.1` |
 | Runtime 版本 | `0.1.0` |
 | State Schema | `3.0.0` |
 | Runtime | .NET 9，本地编译 CLI / Runtime |
@@ -35,6 +35,7 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 - [Autonomous Runtime and Writer Safety](docs/architecture/autonomous-runtime.md)
 - [Context, Graph, Services, and Data Performance](docs/architecture/context-graph-data.md)
 - [Commercial Trust Architecture](docs/architecture/commercial-trust.md)
+- [5.19 Release Process](docs/release/5.19-release-process.md)
 
 ## 当前实现状态
 
@@ -54,7 +55,7 @@ Context Resolver、`hiker resume`、Intent/Dependency/Evidence Graph、50 服务
 - COMM-G1/G2/G3/G16/G17 公私边界和热路径成本；
 - 状态、Handoff、Artifact、Migration、Release 的故障注入。
 
-这些结果分别属于 `DETERMINISTIC_VERIFIED`、`SIMULATION_PROVEN` 或 `REAL_INTEGRATION_PROVEN`；不等于客户现场长期运行。当前仍是开发基线，不代表完整 5.19 商业发布就绪。
+这些结果分别属于 `DETERMINISTIC_VERIFIED`、`SIMULATION_PROVEN` 或 `REAL_INTEGRATION_PROVEN`；不等于客户现场长期运行。当前是发布候选，最终状态只由同一提交生成的商业 Gate 决定。
 
 ## 当前验证结果
 
@@ -62,7 +63,7 @@ Context Resolver、`hiker resume`、Intent/Dependency/Evidence Graph、50 服务
 
 | 验证面 | 结果 | 证据等级 |
 | --- | --- | --- |
-| Unit / Integration | 48/48 PASS | `DETERMINISTIC_VERIFIED` |
+| Unit / Integration | 50/50 PASS | `DETERMINISTIC_VERIFIED` |
 | Community 5.18 回归 | 五插件合计 297/297 PASS，公开工作区保持干净 | `DETERMINISTIC_VERIFIED` |
 | 加速老化 | 12 个合成月份、1201 Task、120 Goal Revision、120 Handoff、60 Crash | `SIMULATION_PROVEN` |
 | 并发写入 | 1/2/4/8 Worker 均恰好一个 CAS 成功 | `REAL_INTEGRATION_PROVEN` |
@@ -88,6 +89,7 @@ dotnet run --project src/Hiker.Pro.Cli -- doctor --root <project>
 dotnet run --project src/Hiker.Pro.Cli -- status --root <project>
 dotnet run --project src/Hiker.Pro.Cli -- resume --root <project> --project-id <stable-id> --goal-id <goal-id>
 dotnet run --project src/Hiker.Pro.Cli -- backup --root <project>
+dotnet run --project src/Hiker.Pro.Cli -- export --root <project> --project-id <stable-id>
 dotnet run --project src/Hiker.Pro.Cli -- migrate-community --root <project> --project-id <stable-id>
 ```
 
@@ -114,6 +116,7 @@ dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario state
 dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario large-repository --root . --file-scale 100000
 dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario real-services --root . --docker
 dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario commercial --root . --public-root <community-5.18-root>
+dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario commercial-security --root .
 dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario codex-runtime --root . --codex-execute
 ```
 
@@ -121,4 +124,4 @@ dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario codex
 
 完整证据边界和当前实测结果见 [5.19 Verification](docs/verification/5.19-verification.md)。
 
-私钥、签名密钥和真实商业License禁止进入Git、Fixture、日志或发行包。
+RC 的签名构建、独立验证和最终聚合 Gate 见 [5.19 Release Process](docs/release/5.19-release-process.md)。私钥、签名密钥和真实商业 License 禁止进入 Git、Fixture、日志或发行包。

@@ -25,6 +25,10 @@ internal sealed record VerificationReport(
     DateTimeOffset StartedAt,
     DateTimeOffset CompletedAt,
     string ProductVersion,
+    string RuntimeVersion,
+    string StateSchemaVersion,
+    string GitCommit,
+    bool GitDirty,
     IReadOnlyList<VerificationCheck> Checks);
 
 internal static class VerificationJson

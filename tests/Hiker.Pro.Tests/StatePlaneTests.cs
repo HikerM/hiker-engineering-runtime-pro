@@ -121,6 +121,27 @@ public sealed class StatePlaneTests
     }
 
     [Fact]
+    public async Task StateExport_IsAtomicExplicitAndCannotTargetAuthoritativeStateDirectory()
+    {
+        await using var project = await TestProject.CreateAsync();
+        Assert.True((await project.Store.CompareAndSwapAsync(Request("export-task", "exported"))).Committed);
+        var result = await project.Store.ExportAsync("project-1");
+        Assert.Equal("EXPORTED", result.Status);
+        Assert.Equal(1, result.Entities);
+        Assert.Equal(1, result.Operations);
+        Assert.Equal(1, result.Events);
+        Assert.True(File.Exists(result.OutputPath));
+        Assert.False(File.Exists($"{result.OutputPath}.tmp"));
+        using var document = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(result.OutputPath));
+        Assert.Equal(result.Generation, document.RootElement.GetProperty("generation").GetInt64());
+        Assert.Equal(1, document.RootElement.GetProperty("entities").GetArrayLength());
+
+        var forbidden = Path.Combine(project.Layout.StateDirectory, "export.json");
+        await Assert.ThrowsAsync<InvalidDataException>(() => project.Store.ExportAsync("project-1", forbidden));
+        await Assert.ThrowsAsync<IOException>(() => project.Store.ExportAsync("project-1", result.OutputPath));
+    }
+
+    [Fact]
     public async Task Community518Import_IsAllowlistedResumableAndEstablishesSingleAuthorityMarker()
     {
         await using var project = await TestProject.CreateAsync();

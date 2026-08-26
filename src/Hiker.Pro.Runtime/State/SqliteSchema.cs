@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Hiker.Pro.Release;
 
 namespace Hiker.Pro.State;
 
@@ -118,6 +119,11 @@ internal static class SqliteSchema
 
     public static async Task InitializeAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
+        if (!string.Equals(CurrentVersion, BuildVersionFacts.Current.StateSchema, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Compiled state schema does not match release version facts");
+        }
+
         await ExecuteAsync(connection, "PRAGMA journal_mode=WAL;", cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, "PRAGMA synchronous=FULL;", cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, "PRAGMA foreign_keys=ON;", cancellationToken).ConfigureAwait(false);

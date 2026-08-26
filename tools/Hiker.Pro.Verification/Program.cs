@@ -1,8 +1,11 @@
 using System.Text.Json;
 using Hiker.Pro.Verification;
+using Hiker.Pro.Release;
 
 var options = Parse(args);
 var startedAt = DateTimeOffset.UtcNow;
+var gitCommit = (await ProcessTools.RequireAsync("git", options.RepositoryRoot, new[] { "rev-parse", "HEAD" }, TimeSpan.FromSeconds(30))).StandardOutput.Trim();
+var gitStatus = (await ProcessTools.RequireAsync("git", options.RepositoryRoot, new[] { "status", "--porcelain=v1", "--untracked-files=all" }, TimeSpan.FromSeconds(30))).StandardOutput;
 var checks = new List<VerificationCheck>();
 try
 {
@@ -19,6 +22,9 @@ try
             break;
         case "commercial":
             checks.AddRange(await new CommercialBoundaryScenario(options).RunAsync());
+            break;
+        case "commercial-security":
+            checks.AddRange(await new CommercialSecurityScenario().RunAsync());
             break;
         case "codex-runtime":
             checks.AddRange(await new CodexRuntimeScenario(options).RunAsync());
@@ -52,6 +58,10 @@ var report = new VerificationReport(
     startedAt,
     DateTimeOffset.UtcNow,
     File.Exists(versionPath) ? (await File.ReadAllTextAsync(versionPath)).Trim() : "UNKNOWN",
+    BuildVersionFacts.Current.Runtime,
+    BuildVersionFacts.Current.StateSchema,
+    gitCommit,
+    !string.IsNullOrWhiteSpace(gitStatus),
     checks);
 Directory.CreateDirectory(Path.GetDirectoryName(options.OutputPath)!);
 await File.WriteAllTextAsync(options.OutputPath, JsonSerializer.Serialize(report, VerificationJson.Options));

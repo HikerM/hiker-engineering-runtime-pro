@@ -62,7 +62,8 @@ public sealed record SignedUpdateManifest(
     string MinimumRuntimeVersion,
     DateTimeOffset PublishedAt,
     IReadOnlyList<UpdateArtifact> Artifacts,
-    IReadOnlyList<string>? RollbackFromVersions = null);
+    IReadOnlyList<string>? RollbackFromVersions = null,
+    string? SourceCommit = null);
 
 public sealed record UpdatePolicyDecision(bool Allowed, string Status);
 

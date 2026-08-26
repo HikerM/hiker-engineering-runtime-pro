@@ -206,6 +206,19 @@ public sealed record StateBackupResult(
 
 public sealed record StateRestoreResult(string Status, string SourceSha256, string SafetyBackupPath, HealthReport Health);
 
+public sealed record StateExportResult(
+    string Status,
+    string OutputPath,
+    string Sha256,
+    long Bytes,
+    long Generation,
+    long Entities,
+    long Operations,
+    long Events,
+    long Dependencies,
+    long Artifacts,
+    DateTimeOffset CreatedAt);
+
 public sealed record CommunityImportReport(
     string Status,
     string ProjectId,

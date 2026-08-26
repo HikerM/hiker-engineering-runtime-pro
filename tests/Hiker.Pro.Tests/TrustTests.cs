@@ -111,6 +111,12 @@ public sealed class TrustTests
         var verifier = new PackageIntegrityVerifier(new SignedEnvelopeVerifier(trust));
         var verified = await verifier.VerifyUpdateAsync(Sign(manifest, "update", TrustPurposes.Update, updateKey), packageRoot);
         Assert.Equal("VERIFIED", verified.Status);
+        var unlistedPath = Path.Combine(packageRoot, "unlisted.dll");
+        await File.WriteAllTextAsync(unlistedPath, "not-in-signed-manifest");
+        var unlisted = await verifier.VerifyUpdateAsync(Sign(manifest, "update", TrustPurposes.Update, updateKey), packageRoot);
+        Assert.Equal("BLOCKED", unlisted.Status);
+        Assert.Contains(unlisted.Failures, static value => value.EndsWith(":UNLISTED_FILE", StringComparison.Ordinal));
+        File.Delete(unlistedPath);
         await File.WriteAllTextAsync(runtimePath, "tampered-runtime");
         var tampered = await verifier.VerifyUpdateAsync(Sign(manifest, "update", TrustPurposes.Update, updateKey), packageRoot);
         Assert.Equal("BLOCKED", tampered.Status);
@@ -167,6 +173,11 @@ public sealed class TrustTests
         Assert.True((await project.Store.CompareAndSwapAsync(request)).Committed);
         var backup = await new StateBackupService(project.Layout).CreateAsync();
         Assert.True(File.Exists(backup.BackupPath));
+        var export = await project.Store.ExportAsync("project-1");
+        Assert.True(File.Exists(export.OutputPath));
+        Assert.Equal(1, export.Entities);
+        Assert.Equal(1, export.Operations);
+        Assert.Equal(1, export.Events);
         Assert.Equal("SAFE", System.Text.Json.JsonDocument.Parse((await project.Store.ReadAsync(request.Mutation.Key))!.PayloadJson)
             .RootElement.GetProperty("status").GetString());
     }

@@ -9,7 +9,8 @@ public sealed class PackageIntegrityVerifier(SignedEnvelopeVerifier verifier)
     public async Task<PackageIntegrityResult> VerifyUpdateAsync(
         SignedEnvelope envelope,
         string packageRoot,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlySet<string>? allowedUnlistedRelativePaths = null)
     {
         var signature = verifier.Verify<SignedUpdateManifest>(envelope, TrustPurposes.Update);
         if (!signature.Valid || signature.Payload is null)
@@ -19,10 +20,17 @@ public sealed class PackageIntegrityVerifier(SignedEnvelopeVerifier verifier)
 
         var root = Path.GetFullPath(packageRoot);
         var failures = new List<string>();
+        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var expectedPaths = new HashSet<string>(pathComparer);
         var verified = 0;
         foreach (var artifact in signature.Payload.Artifacts)
         {
             var path = Resolve(root, artifact.RelativePath);
+            if (!expectedPaths.Add(path))
+            {
+                failures.Add($"{artifact.RelativePath}:DUPLICATE_PATH");
+                continue;
+            }
             if (!File.Exists(path) || new FileInfo(path).Length != artifact.Bytes)
             {
                 failures.Add($"{artifact.RelativePath}:MISSING_OR_SIZE");
@@ -38,6 +46,23 @@ public sealed class PackageIntegrityVerifier(SignedEnvelopeVerifier verifier)
             }
 
             verified++;
+        }
+
+        var allowed = new HashSet<string>(pathComparer);
+        if (allowedUnlistedRelativePaths is not null)
+        {
+            foreach (var relative in allowedUnlistedRelativePaths)
+            {
+                allowed.Add(Resolve(root, relative));
+            }
+        }
+        foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            var full = Path.GetFullPath(path);
+            if (!expectedPaths.Contains(full) && !allowed.Contains(full))
+            {
+                failures.Add($"{Path.GetRelativePath(root, full).Replace(Path.DirectorySeparatorChar, '/')}:UNLISTED_FILE");
+            }
         }
 
         return new PackageIntegrityResult(failures.Count == 0 ? "VERIFIED" : "BLOCKED", verified, failures);

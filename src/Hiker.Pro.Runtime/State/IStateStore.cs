@@ -28,6 +28,10 @@ public interface IStateStore : IAsyncDisposable
     Task<RepairReport> RepairAsync(CancellationToken cancellationToken = default);
     Task<GcReport> GarbageCollectAsync(DateTimeOffset olderThan, CancellationToken cancellationToken = default);
     Task<StoreMetrics> GetMetricsAsync(CancellationToken cancellationToken = default);
+    Task<StateExportResult> ExportAsync(
+        string projectId,
+        string? outputPath = null,
+        CancellationToken cancellationToken = default);
     Task RegisterArtifactAsync(ArtifactRecord artifact, CancellationToken cancellationToken = default);
     Task<IReadOnlySet<string>> ReferencedArtifactHashesAsync(CancellationToken cancellationToken = default);
 }
