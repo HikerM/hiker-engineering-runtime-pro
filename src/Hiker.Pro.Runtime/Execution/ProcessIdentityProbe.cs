@@ -6,10 +6,10 @@ namespace Hiker.Pro.Execution;
 
 public sealed class ProcessIdentityProbe
 {
-    private readonly string _hostFingerprint = Hash($"{Environment.MachineName}|{Environment.OSVersion}|{Environment.ProcessPath}");
+    private readonly string _hostFingerprint = Hash($"{System.Environment.MachineName}|{System.Environment.OSVersion}|{System.Environment.ProcessPath}");
 
     public async Task<RuntimeProcessIdentity> CurrentAsync(CancellationToken cancellationToken = default) =>
-        await CaptureAsync(Environment.ProcessId, cancellationToken).ConfigureAwait(false)
+        await CaptureAsync(System.Environment.ProcessId, cancellationToken).ConfigureAwait(false)
         ?? throw new InvalidOperationException("Current process identity is unavailable");
 
     public Task<RuntimeProcessIdentity?> CaptureAsync(int processId, CancellationToken cancellationToken = default)

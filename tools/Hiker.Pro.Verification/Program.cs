@@ -29,11 +29,15 @@ try
         case "codex-runtime":
             checks.AddRange(await new CodexRuntimeScenario(options).RunAsync());
             break;
+        case "environment-control":
+            checks.AddRange(await new EnvironmentControlPlaneScenario().RunAsync());
+            break;
         case "all":
             checks.AddRange(await new StateAgingScenario().RunAsync());
             checks.AddRange(await new LargeRepositoryScenario(options).RunAsync());
             checks.AddRange(await new RealServicesScenario(options).RunAsync());
             checks.AddRange(await new CommercialBoundaryScenario(options).RunAsync());
+            checks.AddRange(await new EnvironmentControlPlaneScenario().RunAsync());
             break;
         default:
             throw new ArgumentException($"Unknown scenario: {options.Scenario}");

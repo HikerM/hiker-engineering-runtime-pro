@@ -18,6 +18,7 @@ internal sealed class TestProject : IAsyncDisposable
     public SqliteStateStore Store { get; }
     public StateCoordinator Coordinator { get; }
     public ProjectBootstrapService Bootstrap { get; }
+    public string? ProjectId { get; private set; }
 
     public static async Task<TestProject> CreateAsync(string? projectId = null)
     {
@@ -29,7 +30,8 @@ internal sealed class TestProject : IAsyncDisposable
         var project = new TestProject(root, store);
         if (projectId is not null)
         {
-            _ = await project.Bootstrap.InitializeAsync(projectId).ConfigureAwait(false);
+            var initialized = await project.Bootstrap.InitializeAsync(projectId).ConfigureAwait(false);
+            project.ProjectId = initialized.ProjectId;
         }
 
         return project;

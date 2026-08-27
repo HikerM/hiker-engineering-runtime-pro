@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Hiker.Pro.Environment;
 using Hiker.Pro.State;
 using Hiker.Pro.Workspace;
 
@@ -10,7 +11,8 @@ public sealed class RuntimeCoordinator(
     IWorkspaceInspector workspaceInspector,
     ProcessIdentityProbe processProbe,
     ProjectBootstrapService bootstrap,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IEnvironmentRuntimeGate? environmentGate = null)
 {
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
@@ -32,6 +34,18 @@ public sealed class RuntimeCoordinator(
 
         var workspace = await workspaceInspector.InspectAsync(request.WorkspacePath, cancellationToken).ConfigureAwait(false);
         await ValidateWorktreeConflictsAsync(request, workspace, cancellationToken).ConfigureAwait(false);
+        if (request.EnvironmentProfileId is not null || request.EnvironmentInstanceId is not null)
+        {
+            if (environmentGate is null)
+            {
+                throw new InvalidOperationException("Environment-bound runtime requires the environment control plane");
+            }
+            var environment = await environmentGate.ValidateStartAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!environment.Allowed)
+            {
+                throw new InvalidOperationException($"Environment runtime gate blocked start: {string.Join(',', environment.Findings)}");
+            }
+        }
         var keys = RuntimeKeys(request.ProjectId, request.TaskId, request.RuntimeId, request.WorktreeId);
         var current = await ReadAsync(keys, cancellationToken).ConfigureAwait(false);
         if (current.Lease is not null && !await CanReplaceLeaseAsync(current.Lease, cancellationToken).ConfigureAwait(false))
@@ -244,6 +258,11 @@ public sealed class RuntimeCoordinator(
         if (request.NonSecretOptions?.Keys.Any(static key => key.Contains("secret", StringComparison.OrdinalIgnoreCase) || key.Contains("token", StringComparison.OrdinalIgnoreCase) || key.Contains("password", StringComparison.OrdinalIgnoreCase)) == true)
         {
             throw new ArgumentException("Runtime options must not carry secrets");
+        }
+
+        if ((request.EnvironmentProfileId is null) != (request.EnvironmentInstanceId is null))
+        {
+            throw new ArgumentException("Environment profile and instance bindings must be supplied together");
         }
 
         if (!adapter.Capabilities.Resume)

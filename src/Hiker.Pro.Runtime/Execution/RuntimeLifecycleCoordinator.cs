@@ -1,8 +1,12 @@
+using Hiker.Pro.Environment;
 using Hiker.Pro.State;
 
 namespace Hiker.Pro.Execution;
 
-public sealed class RuntimeLifecycleCoordinator(StateCoordinator coordinator, TimeProvider? timeProvider = null)
+public sealed class RuntimeLifecycleCoordinator(
+    StateCoordinator coordinator,
+    TimeProvider? timeProvider = null,
+    EnvironmentReleaseCoordinator? environmentRelease = null)
 {
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
@@ -67,6 +71,25 @@ public sealed class RuntimeLifecycleCoordinator(StateCoordinator coordinator, Ti
         if (terminal.Lifecycle is RuntimeLifecycle.Starting or RuntimeLifecycle.Running or RuntimeLifecycle.Waiting)
         {
             return new RuntimeCompletionResult("RECOVERY_REQUIRED", drain.CurrentGeneration, output, artifacts, events);
+        }
+
+        if (request.EnvironmentInstanceId is not null)
+        {
+            if (environmentRelease is null)
+            {
+                return new RuntimeCompletionResult("RECOVERY_REQUIRED", drain.CurrentGeneration, output, artifacts, events);
+            }
+            var environment = await environmentRelease.ReleaseAsync(new EnvironmentReleaseRequest(
+                $"{request.OperationId}:environment",
+                request.ProjectId,
+                request.TaskId,
+                request.Handle.RuntimeId,
+                request.EnvironmentInstanceId,
+                request.SourceFingerprint), cancellationToken).ConfigureAwait(false);
+            if (environment.Status is not "RELEASED" and not "ALREADY_RELEASED")
+            {
+                return new RuntimeCompletionResult("RECOVERY_REQUIRED", environment.Generation, output, artifacts, events);
+            }
         }
 
         var drained = await ReadAsync(request, cancellationToken).ConfigureAwait(false);

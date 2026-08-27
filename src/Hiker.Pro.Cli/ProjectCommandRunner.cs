@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Hiker.Pro.Context;
 using Hiker.Pro.Diagnostics;
+using Hiker.Pro.Environment;
 using Hiker.Pro.Execution;
 using Hiker.Pro.Release;
 using Hiker.Pro.State;
@@ -46,16 +47,20 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
 
                     var active = await bootstrap.RequireActiveAsync(ProjectBootstrapIntent.Read, suppliedProjectId).ConfigureAwait(false);
                     var health = await new AdvancedDoctor(store, new ProcessIdentityProbe()).CheckProjectAsync(active.ProjectId!).ConfigureAwait(false);
-                    Write(new { health.Status, health.Findings, project = active });
-                    return health.Status == "BLOCKED" ? 2 : 0;
+                    var environment = await CheckEnvironmentAsync(state, active.ProjectId!).ConfigureAwait(false);
+                    var status = health.Status == "BLOCKED" || environment?.Status == "BLOCKED" ? "BLOCKED" : health.Status;
+                    Write(new { status, health.Findings, environment, project = active });
+                    return status == "BLOCKED" ? 2 : 0;
                 }
             case "status":
                 {
                     var active = await bootstrap.RequireActiveAsync(ProjectBootstrapIntent.Read, suppliedProjectId).ConfigureAwait(false);
                     var health = await new AdvancedDoctor(store, new ProcessIdentityProbe()).CheckProjectAsync(active.ProjectId!).ConfigureAwait(false);
+                    var environment = await CheckEnvironmentAsync(state, active.ProjectId!).ConfigureAwait(false);
                     var metrics = await store.GetMetricsAsync().ConfigureAwait(false);
-                    Write(new { ok = health.Status != "BLOCKED", project = active, health, metrics });
-                    return health.Status == "BLOCKED" ? 2 : 0;
+                    var ok = health.Status != "BLOCKED" && environment?.Status != "BLOCKED";
+                    Write(new { ok, project = active, health, environment, metrics });
+                    return ok ? 0 : 2;
                 }
             case "backup":
                 {
@@ -68,7 +73,7 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
                 {
                     var providerSession = ResolveProviderSession(args);
                     var boundaryProof = ValueAfter(args, "--boundary-proof") ??
-                        Environment.GetEnvironmentVariable("HIKER_SAFE_BOUNDARY") ??
+                        System.Environment.GetEnvironmentVariable("HIKER_SAFE_BOUNDARY") ??
                         throw new ArgumentException("attach requires a host-confirmed safe boundary");
                     var adoption = await new LiveSessionAdoptionService(
                         layout,
@@ -140,9 +145,9 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
                 {
                     var goal = ValueAfter(args, "--goal-id");
                     if (goal is not null && ValueAfter(args, "--provider-session-id") is null &&
-                        Environment.GetEnvironmentVariable("HIKER_PROVIDER_SESSION_ID") is null &&
-                        Environment.GetEnvironmentVariable("CODEX_THREAD_ID") is null &&
-                        Environment.GetEnvironmentVariable("CODEX_SESSION_ID") is null)
+                        System.Environment.GetEnvironmentVariable("HIKER_PROVIDER_SESSION_ID") is null &&
+                        System.Environment.GetEnvironmentVariable("CODEX_THREAD_ID") is null &&
+                        System.Environment.GetEnvironmentVariable("CODEX_SESSION_ID") is null)
                     {
                         var active = await bootstrap.RequireActiveAsync(ProjectBootstrapIntent.Read, suppliedProjectId).ConfigureAwait(false);
                         var resume = await new ProjectResumeService(store).ResumeAsync(active.ProjectId!, goal).ConfigureAwait(false);
@@ -152,7 +157,7 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
 
                     var providerSession = ResolveProviderSession(args);
                     var boundaryProof = ValueAfter(args, "--boundary-proof") ??
-                        Environment.GetEnvironmentVariable("HIKER_SAFE_BOUNDARY") ??
+                        System.Environment.GetEnvironmentVariable("HIKER_SAFE_BOUNDARY") ??
                         throw new ArgumentException("resume requires a host-confirmed safe boundary");
                     var adoption = await new LiveSessionAdoptionService(
                         layout,
@@ -287,15 +292,15 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
 
     private static ProviderSession ResolveProviderSession(string[] args)
     {
-        var explicitProvider = ValueAfter(args, "--provider") ?? Environment.GetEnvironmentVariable("HIKER_PROVIDER");
-        var explicitSession = ValueAfter(args, "--provider-session-id") ?? Environment.GetEnvironmentVariable("HIKER_PROVIDER_SESSION_ID");
+        var explicitProvider = ValueAfter(args, "--provider") ?? System.Environment.GetEnvironmentVariable("HIKER_PROVIDER");
+        var explicitSession = ValueAfter(args, "--provider-session-id") ?? System.Environment.GetEnvironmentVariable("HIKER_PROVIDER_SESSION_ID");
         if (!string.IsNullOrWhiteSpace(explicitSession))
         {
             return new ProviderSession(explicitProvider ?? "external", explicitSession);
         }
 
-        var codexSession = Environment.GetEnvironmentVariable("CODEX_THREAD_ID") ??
-            Environment.GetEnvironmentVariable("CODEX_SESSION_ID");
+        var codexSession = System.Environment.GetEnvironmentVariable("CODEX_THREAD_ID") ??
+            System.Environment.GetEnvironmentVariable("CODEX_SESSION_ID");
         if (!string.IsNullOrWhiteSpace(codexSession))
         {
             return new ProviderSession("codex", codexSession);
@@ -308,6 +313,16 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
     {
         await using var stream = new FileStream(Path.GetFullPath(path), FileMode.Open, FileAccess.Read, FileShare.Read, 131072, FileOptions.Asynchronous | FileOptions.SequentialScan);
         return Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream).ConfigureAwait(false)).ToLowerInvariant();
+    }
+
+    private async Task<EnvironmentDoctorReport?> CheckEnvironmentAsync(StateCoordinator state, string projectId)
+    {
+        var profiles = await state.ReadAsync(projectId, EntityKinds.EnvironmentProfile, lifecycle: null, 1).ConfigureAwait(false);
+        if (profiles.Count == 0) return null;
+        var providers = new EnvironmentProviderRegistry();
+        providers.Register(new LocalProjectEnvironmentProvider(root));
+        providers.Register(new WorkspaceIsolationEnvironmentProvider(root));
+        return await new EnvironmentDoctor(state, providers, new ProcessIdentityProbe()).CheckAsync(root, projectId).ConfigureAwait(false);
     }
 
     private sealed record ProviderSession(string Provider, string SessionId);

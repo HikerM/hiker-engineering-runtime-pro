@@ -149,8 +149,12 @@ public sealed class ContextResolver(IStateStore stateStore, TimeProvider? timePr
         EntityKinds.Decision => 3,
         EntityKinds.Contract => 4,
         EntityKinds.Service => 5,
-        EntityKinds.Evidence => 6,
-        EntityKinds.Checkpoint => 7,
+        EntityKinds.EnvironmentProfile => 6,
+        EntityKinds.EnvironmentInstance => 7,
+        EntityKinds.ResourceLease => 8,
+        EntityKinds.ServiceProcess => 9,
+        EntityKinds.Evidence => 10,
+        EntityKinds.Checkpoint => 11,
         _ => 20
     };
 

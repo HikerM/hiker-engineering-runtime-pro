@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Hiker.Pro.Environment;
 using Hiker.Pro.State;
 using Hiker.Pro.Workspace;
 
@@ -9,7 +10,8 @@ public sealed class RecoveryCoordinator(
     StateCoordinator coordinator,
     IWorkspaceInspector workspaceInspector,
     ProcessIdentityProbe processProbe,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IEnvironmentRecoveryGate? environmentGate = null)
 {
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
@@ -59,6 +61,25 @@ public sealed class RecoveryCoordinator(
         if (priorStatus is null && lease.ExpiresAt > _clock.GetUtcNow())
         {
             return new TaskRecoveryResult("REQUIRES_REVIEW", null, states.Task!.Generation, "LEASE_NOT_EXPIRED");
+        }
+
+        if (plan.EnvironmentInstanceId is not null)
+        {
+            if (environmentGate is null)
+            {
+                return new TaskRecoveryResult("RECOVERY_REQUIRED", null, states.Task!.Generation, "ENVIRONMENT_RECOVERY_GATE_UNAVAILABLE");
+            }
+            var environment = await environmentGate.RevalidateAsync(
+                workspace.Root,
+                plan.ProjectId,
+                plan.TaskId,
+                plan.PriorHandle.RuntimeId,
+                plan.EnvironmentInstanceId,
+                cancellationToken).ConfigureAwait(false);
+            if (!environment.Allowed)
+            {
+                return new TaskRecoveryResult("RECOVERY_REQUIRED", null, states.Task!.Generation, "ENVIRONMENT_RESOURCE_REVALIDATION_FAILED");
+            }
         }
 
         var start = new RuntimeStartRequest(
@@ -112,6 +133,25 @@ public sealed class RecoveryCoordinator(
         {
             await plan.RecoveryAdapter.ShutdownAsync(target, cancellationToken).ConfigureAwait(false);
             return new TaskRecoveryResult(reserve.Status, null, reserve.CurrentGeneration, "RESERVATION_CONFLICT");
+        }
+
+        if (plan.EnvironmentInstanceId is not null)
+        {
+            var transfer = await environmentGate!.TransferRuntimeAsync(
+                $"{plan.OperationId}:environment-transfer",
+                plan.ProjectId,
+                plan.TaskId,
+                plan.PriorHandle.RuntimeId,
+                target.RuntimeId,
+                plan.EnvironmentInstanceId,
+                plan.GoalRevision,
+                plan.SourceFingerprint,
+                cancellationToken).ConfigureAwait(false);
+            if (!transfer.Committed)
+            {
+                await plan.RecoveryAdapter.ShutdownAsync(target, cancellationToken).ConfigureAwait(false);
+                return new TaskRecoveryResult("RECOVERY_REQUIRED", null, transfer.CurrentGeneration, "ENVIRONMENT_RUNTIME_TRANSFER_FAILED");
+            }
         }
 
         RuntimeHandle recovered;

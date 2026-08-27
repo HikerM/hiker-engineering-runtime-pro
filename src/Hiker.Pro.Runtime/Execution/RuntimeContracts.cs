@@ -34,7 +34,9 @@ public sealed record RuntimeStartRequest(
     string SourceFingerprint,
     IReadOnlyDictionary<string, string>? NonSecretOptions = null,
     string WorktreeId = "",
-    IReadOnlyList<string>? PredictedAffectedScopes = null);
+    IReadOnlyList<string>? PredictedAffectedScopes = null,
+    string? EnvironmentProfileId = null,
+    string? EnvironmentInstanceId = null);
 
 public sealed record RuntimeHandle(
     string RuntimeId,
@@ -129,7 +131,9 @@ public sealed record HandoffRequest(
     long GoalRevision,
     string SourceFingerprint,
     IReadOnlyList<string> RelevantStateRefs,
-    IReadOnlyList<string> AcceptanceIds);
+    IReadOnlyList<string> AcceptanceIds,
+    string? EnvironmentProfileId = null,
+    string? EnvironmentInstanceId = null);
 
 public sealed record HandoffResult(
     string Status,
@@ -152,7 +156,8 @@ public sealed record TaskRecoveryPlan(
     string WorkspacePath,
     string ExpectedWorkspaceFingerprint,
     long GoalRevision,
-    string SourceFingerprint);
+    string SourceFingerprint,
+    string? EnvironmentInstanceId = null);
 
 public sealed record TaskRecoveryResult(string Status, RuntimeHandle? Handle, long Generation, string DetailCode);
 
@@ -165,7 +170,8 @@ public sealed record RuntimeCompletionRequest(
     IExecutionRuntimeAdapter Adapter,
     RuntimeLifecycle Outcome,
     long GoalRevision,
-    string SourceFingerprint);
+    string SourceFingerprint,
+    string? EnvironmentInstanceId = null);
 
 public sealed record RuntimeCompletionResult(
     string Status,

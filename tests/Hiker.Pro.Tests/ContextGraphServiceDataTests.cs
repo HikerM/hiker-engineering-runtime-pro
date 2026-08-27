@@ -1,6 +1,7 @@
 using Hiker.Pro.Context;
 using Hiker.Pro.Data;
 using Hiker.Pro.Execution;
+using Hiker.Pro.Environment;
 using Hiker.Pro.Graph;
 using Hiker.Pro.Services;
 using Hiker.Pro.State;
@@ -97,18 +98,21 @@ public sealed class ContextGraphServiceDataTests
     }
 
     [Fact]
-    public async Task ResourceLease_CasAllocatesDistinctPortsAcrossConcurrentWorkers()
+    public async Task ResourceLease_CasPersistsProviderAllocatedResourcesAcrossConcurrentWorkers()
     {
         await using var project = await TestProject.CreateAsync();
-        var coordinator = new ResourceLeaseCoordinator(project.Coordinator, new ProcessIdentityProbe());
-        var tasks = Enumerable.Range(0, 8).Select(index => coordinator.AcquireAsync(new ResourceLeaseRequest(
-            $"port-op-{index}", "project-1", $"task-{index}", $"runtime-{index}", "PORT", null,
-            52000, 52100, null, TimeSpan.FromMinutes(5), $"source-{index}"))).ToArray();
+        var coordinator = new EnvironmentResourceLeaseCoordinator(project.Coordinator, new ProcessIdentityProbe());
+        var tasks = Enumerable.Range(0, 8).Select(index => coordinator.AcquireAsync(new EnvironmentResourceLeaseRequest(
+            $"port-op-{index}", "project-1", $"task-{index}", $"runtime-{index}", $"worktree-{index}", $"environment-{index}",
+            new[] { new ResourceRequirement("port", (52000 + index).ToString(), "network-provider", "host", ResourceSharingMode.Exclusive) },
+            null, TimeSpan.FromMinutes(5), $"source-{index}"))).ToArray();
         var leases = await Task.WhenAll(tasks);
-        Assert.Equal(8, leases.Select(static item => item.Lease.Token).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(8, leases.SelectMany(static item => item.Leases).Select(static lease => lease.Requirement.ResourceId).Distinct(StringComparer.Ordinal).Count());
         Assert.All(leases, static item => Assert.Equal("COMMITTED", item.Status));
-        var retry = await coordinator.AcquireAsync(new ResourceLeaseRequest(
-            "port-op-0", "project-1", "task-0", "runtime-0", "PORT", null, 52000, 52100, null, TimeSpan.FromMinutes(5), "source-0"));
+        var retry = await coordinator.AcquireAsync(new EnvironmentResourceLeaseRequest(
+            "port-op-0", "project-1", "task-0", "runtime-0", "worktree-0", "environment-0",
+            new[] { new ResourceRequirement("port", "52000", "network-provider", "host", ResourceSharingMode.Exclusive) },
+            null, TimeSpan.FromMinutes(5), "source-0"));
         Assert.Equal("IDEMPOTENT_REPLAY", retry.Status);
     }
 

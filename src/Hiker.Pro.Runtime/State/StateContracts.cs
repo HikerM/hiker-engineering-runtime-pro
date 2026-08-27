@@ -45,6 +45,10 @@ public static class EntityKinds
     public const string RuntimeLease = "RUNTIME_LEASE";
     public const string Agent = "AGENT";
     public const string ProviderSessionBinding = "PROVIDER_SESSION_BINDING";
+    public const string EnvironmentProfile = "ENVIRONMENT_PROFILE";
+    public const string EnvironmentInstance = "ENVIRONMENT_INSTANCE";
+    public const string EnvironmentObservation = "ENVIRONMENT_OBSERVATION";
+    public const string ServiceProcess = "SERVICE_PROCESS";
     public const string Checkpoint = "CHECKPOINT";
     public const string Evidence = "EVIDENCE";
     public const string Candidate = "CANDIDATE";

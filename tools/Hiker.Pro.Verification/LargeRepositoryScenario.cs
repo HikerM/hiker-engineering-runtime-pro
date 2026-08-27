@@ -45,7 +45,7 @@ internal sealed class LargeRepositoryScenario(VerificationOptions options)
             for (var index = 0; index < 100; index++)
             {
                 var path = Path.Combine(root, "services", $"service-{index % 50:D2}", $"bucket-{index / 1000:D4}", $"component-{index:D6}.json");
-                await File.AppendAllTextAsync(path, Environment.NewLine + "{\"changed\":true}").ConfigureAwait(false);
+                await File.AppendAllTextAsync(path, System.Environment.NewLine + "{\"changed\":true}").ConfigureAwait(false);
             }
 
             stopwatch.Restart();

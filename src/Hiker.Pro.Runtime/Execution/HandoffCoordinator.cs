@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Hiker.Pro.Artifacts;
+using Hiker.Pro.Environment;
 using Hiker.Pro.State;
 using Hiker.Pro.Workspace;
 
@@ -10,7 +11,8 @@ public sealed class HandoffCoordinator(
     StateCoordinator coordinator,
     ContentAddressedArtifactStore artifactStore,
     IWorkspaceInspector workspaceInspector,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IEnvironmentRecoveryGate? environmentGate = null)
 {
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
@@ -33,6 +35,17 @@ public sealed class HandoffCoordinator(
 
         var currentStates = await ReadStatesAsync(request.ProjectId, request.TaskId, request.CurrentHandle.RuntimeId, request.TargetRuntimeId, request.WorktreeId, cancellationToken).ConfigureAwait(false);
         ValidateCurrentOwner(request, currentStates);
+        if (request.EnvironmentInstanceId is not null)
+        {
+            if (environmentGate is null) throw new InvalidOperationException("Environment-bound handoff requires the environment control plane");
+            var environment = await environmentGate.ValidateCurrentAsync(
+                request.ProjectId,
+                request.TaskId,
+                request.CurrentHandle.RuntimeId,
+                request.EnvironmentInstanceId,
+                cancellationToken).ConfigureAwait(false);
+            if (!environment.Allowed) throw new InvalidOperationException($"Environment handoff gate blocked transfer: {string.Join(',', environment.Findings)}");
+        }
         var status = await request.CurrentAdapter.StatusAsync(request.CurrentHandle, cancellationToken).ConfigureAwait(false);
         if (status.Lifecycle is not (RuntimeLifecycle.Running or RuntimeLifecycle.Waiting or RuntimeLifecycle.Paused))
         {
@@ -62,7 +75,9 @@ public sealed class HandoffCoordinator(
             request.GoalRevision,
             request.SourceFingerprint,
             new Dictionary<string, string>(StringComparer.Ordinal) { ["handoff_format"] = "hiker-minimal-handoff/v1" },
-            request.WorktreeId);
+            request.WorktreeId,
+            EnvironmentProfileId: request.EnvironmentProfileId,
+            EnvironmentInstanceId: request.EnvironmentInstanceId);
         var target = await request.TargetAdapter.StartAsync(targetStartRequest, cancellationToken).ConfigureAwait(false);
         if (target.Lifecycle != RuntimeLifecycle.Starting)
         {
@@ -91,6 +106,25 @@ public sealed class HandoffCoordinator(
             await request.TargetAdapter.ShutdownAsync(target, cancellationToken).ConfigureAwait(false);
             await BestEffortResumeAsync(request.CurrentAdapter, paused, cancellationToken).ConfigureAwait(false);
             return new HandoffResult(transfer.Status, null, checkpoint, handoffArtifact, transfer.CurrentGeneration);
+        }
+
+        if (request.EnvironmentInstanceId is not null)
+        {
+            var environmentTransfer = await environmentGate!.TransferRuntimeAsync(
+                $"{request.OperationId}:environment-transfer",
+                request.ProjectId,
+                request.TaskId,
+                paused.RuntimeId,
+                target.RuntimeId,
+                request.EnvironmentInstanceId,
+                request.GoalRevision,
+                request.SourceFingerprint,
+                cancellationToken).ConfigureAwait(false);
+            if (!environmentTransfer.Committed)
+            {
+                await request.TargetAdapter.ShutdownAsync(target, cancellationToken).ConfigureAwait(false);
+                return new HandoffResult("RECOVERY_REQUIRED", null, checkpoint, handoffArtifact, environmentTransfer.CurrentGeneration);
+            }
         }
 
         RuntimeHandle recovered;
@@ -160,6 +194,8 @@ public sealed class HandoffCoordinator(
             },
             relevant_state_refs = request.RelevantStateRefs.Take(64).ToArray(),
             acceptance_ids = request.AcceptanceIds.Take(64).ToArray(),
+            environment_profile_id = request.EnvironmentProfileId,
+            environment_instance_id = request.EnvironmentInstanceId,
             request.SourceFingerprint
         });
         return await artifactStore.PutAsync(new ArtifactPutRequest(
@@ -283,6 +319,10 @@ public sealed class HandoffCoordinator(
         if (request.RelevantStateRefs.Count > 256 || request.AcceptanceIds.Count > 256)
         {
             throw new ArgumentOutOfRangeException(nameof(request), "Handoff inputs exceed bounded context limits");
+        }
+        if ((request.EnvironmentProfileId is null) != (request.EnvironmentInstanceId is null))
+        {
+            throw new ArgumentException("Handoff environment profile and instance bindings must be supplied together");
         }
     }
 

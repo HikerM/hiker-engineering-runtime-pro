@@ -8,7 +8,7 @@ application.MapGet("/health", () => Results.Json(new
 {
     status = "HEALTHY",
     service = options.Name,
-    process_id = Environment.ProcessId
+    process_id = System.Environment.ProcessId
 }));
 application.MapPost("/work", async (HttpRequest request) =>
 {
