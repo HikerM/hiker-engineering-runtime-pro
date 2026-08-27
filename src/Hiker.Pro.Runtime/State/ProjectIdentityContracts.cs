@@ -51,7 +51,9 @@ public static class LegacyInventoryClassifications
 {
     public const string KnownLegacyContent = "KNOWN_LEGACY_CONTENT";
     public const string SafePreservedContent = "SAFE_PRESERVED_CONTENT";
-    public const string MigratableLegacyContent = "MIGRATABLE_LEGACY_CONTENT";
+    public const string TemporaryRebuildable = "TEMPORARY_REBUILDABLE";
+    public const string MigratableLegacyFact = "MIGRATABLE_LEGACY_FACT";
+    public const string MigratableLegacyContent = MigratableLegacyFact;
     public const string UnknownRequiresReview = "UNKNOWN_REQUIRES_REVIEW";
 }
 

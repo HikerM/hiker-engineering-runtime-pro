@@ -84,6 +84,11 @@ public sealed class ProjectBootstrapService(
                 return Result(ProjectBootstrapState.IdentityMismatch, payload.ProjectId, IdentityAuthority, intent, content, identity, "SUPPLIED_ID_MISMATCH");
             }
 
+            if (content.UnknownItems.Count > 0)
+            {
+                return Result(ProjectBootstrapState.RequiresReview, payload.ProjectId, IdentityAuthority, intent, content, identity, "UNKNOWN_AI_CONTENT");
+            }
+
             var importComplete = identity.CompletedCommunityImportProjectIds.Contains(payload.ProjectId, StringComparer.Ordinal);
             ProjectBootstrapState stateValue;
             string reason;
@@ -135,6 +140,11 @@ public sealed class ProjectBootstrapService(
 
         if (recoveredId is not null)
         {
+            if (content.UnknownItems.Count > 0)
+            {
+                return Result(ProjectBootstrapState.RequiresReview, recoveredId, "LEGACY_STATE_NAMESPACE", intent, content, identity, "UNKNOWN_AI_CONTENT");
+            }
+
             var imported = identity.CompletedCommunityImportProjectIds.Contains(recoveredId, StringComparer.Ordinal);
             if (identity.HasImportedCommunityFacts && !imported)
             {
@@ -157,10 +167,13 @@ public sealed class ProjectBootstrapService(
             return Result(ProjectBootstrapState.RequiresReview, null, "NONE", intent, content, identity, "UNKNOWN_AI_CONTENT");
         }
 
-        if (content.MigratableLegacyFacts > 0)
+        if (content.MigratableLegacyFacts > 0 || content.LegacyInventory.SafePreservedContent > 0)
         {
             var legacyState = identity.DatabaseExists ? ProjectBootstrapState.MixedLegacyProject : ProjectBootstrapState.LegacyProject;
-            return Result(legacyState, supplied, "NONE", intent, content, identity, "LEGACY_FACTS_DISCOVERED");
+            var reason = content.MigratableLegacyFacts > 0
+                ? "LEGACY_FACTS_DISCOVERED"
+                : "PRESERVED_LEGACY_CONTENT_DISCOVERED";
+            return Result(legacyState, supplied, "NONE", intent, content, identity, reason);
         }
 
         if (identity.DatabaseExists)

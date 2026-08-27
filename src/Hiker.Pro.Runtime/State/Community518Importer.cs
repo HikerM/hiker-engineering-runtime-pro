@@ -12,6 +12,19 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
         var inventory = LegacyAiInventoryInspector.Inspect(layout);
         var markerKey = new StateKey(normalizedProject, EntityKinds.Migration, "community-5.18");
         var marker = await state.ReadAsync(markerKey, cancellationToken).ConfigureAwait(false);
+        if (inventory.UnknownItems.Count > 0)
+        {
+            return new CommunityImportReport(
+                "REQUIRES_REVIEW",
+                normalizedProject,
+                0,
+                0,
+                0,
+                inventory.Summary.InventoryFingerprint,
+                inventory.UnknownItems,
+                inventory.Summary);
+        }
+
         if (marker is not null)
         {
             using var markerDocument = JsonDocument.Parse(marker.PayloadJson);
@@ -23,19 +36,6 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
                 markerDocument.RootElement.GetProperty("imported").GetInt32(),
                 marker.SourceFingerprint,
                 Array.Empty<string>(),
-                inventory.Summary);
-        }
-
-        if (inventory.UnknownItems.Count > 0)
-        {
-            return new CommunityImportReport(
-                "REQUIRES_REVIEW",
-                normalizedProject,
-                0,
-                0,
-                0,
-                inventory.Summary.InventoryFingerprint,
-                inventory.UnknownItems,
                 inventory.Summary);
         }
 

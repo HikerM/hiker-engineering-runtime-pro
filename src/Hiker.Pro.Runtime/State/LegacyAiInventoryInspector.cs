@@ -80,7 +80,7 @@ internal static class LegacyAiInventoryInspector
                 migratable));
         }
 
-        InspectTopLevel(layout, unknown);
+        InspectTopLevel(layout, inspectLegacyContents, entries, unknown, fingerprintItems);
         var frozenEntries = ContractCollections.Freeze(entries);
         var summary = new LegacyInventorySummary(
             frozenEntries.Count(entry => entry.Classifications.Contains(LegacyInventoryClassifications.KnownLegacyContent, StringComparer.Ordinal)),
@@ -169,21 +169,54 @@ internal static class LegacyAiInventoryInspector
         return count;
     }
 
-    private static void InspectTopLevel(ProjectLayout layout, List<string> unknown)
+    private static void InspectTopLevel(
+        ProjectLayout layout,
+        bool inspectLegacyContents,
+        List<LegacyInventoryEntry> entries,
+        List<string> unknown,
+        List<string> fingerprintItems)
     {
         foreach (var item in Directory.EnumerateFileSystemEntries(layout.AiRoot, "*", SearchOption.TopDirectoryOnly))
         {
             var name = Path.GetFileName(item);
-            if (KnownTopLevelNames.Contains(name) ||
-                name.StartsWith(".staging", StringComparison.Ordinal) ||
-                name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+            if (KnownTopLevelNames.Contains(name))
             {
                 continue;
             }
 
-            AddUnknown(unknown, name);
+            var temporary = name.StartsWith(".staging", StringComparison.Ordinal) ||
+                            name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
+            var inspection = inspectLegacyContents
+                ? LegacyUntrustedContentInspector.Inspect(layout, item)
+                : LegacyUntrustedContentInspector.InspectShallow(layout, item);
+            fingerprintItems.AddRange(inspection.FingerprintItems);
+            if (inspection.SafeToPreserve)
+            {
+                entries.Add(PreservedEntry(name, temporary));
+                continue;
+            }
+
+            foreach (var finding in inspection.Findings) AddUnknown(unknown, finding);
+            entries.Add(new LegacyInventoryEntry(
+                name,
+                "POTENTIAL_HIKER_STATE_AUTHORITY",
+                new[] { LegacyInventoryClassifications.UnknownRequiresReview },
+                "BLOCKED_REQUIRES_REVIEW",
+                0));
         }
     }
+
+    private static LegacyInventoryEntry PreservedEntry(string path, bool temporary) => new(
+        path,
+        temporary ? "REBUILDABLE_TEMPORARY_CONTENT" : "PRESERVED_UNTRUSTED_LEGACY_CONTENT",
+        new[]
+        {
+            temporary
+                ? LegacyInventoryClassifications.TemporaryRebuildable
+                : LegacyInventoryClassifications.SafePreservedContent
+        },
+        temporary ? "REBUILDABLE_NO_IMPORT" : "UNTRUSTED_LAZY_SOURCE_PRESERVE_ONLY",
+        0);
 
     private static bool IsReparsePoint(string path)
     {

@@ -1,6 +1,22 @@
 # Changelog
 
-## 5.19.0-rc.5 — Unreleased
+## 5.19.0-rc.6 — Unreleased
+
+### Added
+
+- `GA-5.19-LEGACY-INVENTORY-002`：新增 Preserved Untrusted Legacy Content 分类，对非权威旧脚本、文档、二进制和普通工具JSON执行有界只读盘点、原地保留与Inventory fingerprint，不执行、不导入、不删除、不移动。
+- 仅含安全保留内容而无可导入Fact的Legacy项目仍创建稳定Project ID和零Fact Migration Marker，避免被误判为全新项目。
+
+### Safety
+
+- Hiker权威文件名、权威JSON包络、未知受支持Schema、reparse point、path escape与超过10,000项的目录保持 `UNKNOWN_REQUIRES_REVIEW`；Importer仍只读取固定Community Source Catalog。
+- 可执行扩展名不代表受信任；脚本与可执行文件只作为惰性字节保留，迁移路径没有执行入口。
+
+### Verification
+
+- 私有源码完整 Unit / Integration：110/110 PASS；新增Python零执行/零修改/零删除/零移动、普通JSON保留、Ownership/Identity伪装阻断、Junction逃逸、path traversal、无界目录和零Fact迁移健康闭环测试。
+
+## 5.19.0-rc.5 — 2026-08-27
 
 ### Added
 
