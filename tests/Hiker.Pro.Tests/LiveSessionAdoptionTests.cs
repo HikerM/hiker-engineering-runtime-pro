@@ -76,6 +76,54 @@ public sealed class LiveSessionAdoptionTests
     }
 
     [Fact]
+    public async Task ExistingAdoptionWithLegacyTaskRevision_RebindsOnceWithoutDuplicatingRuntimeState()
+    {
+        await using var project = await TestProject.CreateAsync(ProjectId);
+        await SeedCurrentWorkAsync(project);
+        var service = Service(project);
+        Assert.Equal(LiveAdoptionStatuses.Adopted, (await service.AdoptAsync(Request())).Status);
+        var taskKey = new StateKey(ProjectId, EntityKinds.Task, "task-current");
+        var task = Assert.IsType<StateSnapshot>(await project.Store.ReadAsync(taskKey));
+        Assert.True((await project.Coordinator.CommitBatchAsync(new BatchTransactionRequest(
+            "fixture-legacy-task-revision",
+            new[]
+            {
+                new StateMutation(
+                    task.Key,
+                    task.Generation,
+                    142,
+                    task.Lifecycle,
+                    task.Authority,
+                    task.SchemaVersion,
+                    task.SourceFingerprint,
+                    task.DependencyFingerprint,
+                    task.PayloadJson,
+                    task.Retention)
+            },
+            "FIXTURE_REVISION_DRIFTED",
+            "FIXTURE_ONLY",
+            "{}"))).Committed);
+
+        var rebound = await service.AdoptAsync(Request());
+        var afterRebind = await project.Store.ReadAsync(taskKey);
+        var metrics = await project.Store.GetMetricsAsync();
+        var retry = await service.AdoptAsync(Request());
+        var afterRetry = await project.Store.GetMetricsAsync();
+        var tasks = await project.Store.ReadAsync(ProjectId, EntityKinds.Task, lifecycle: null, limit: 8);
+        var bindings = await project.Store.ReadAsync(ProjectId, EntityKinds.ProviderSessionBinding, lifecycle: null, limit: 8);
+
+        Assert.Equal(LiveAdoptionStatuses.Adopted, rebound.Status);
+        Assert.True(rebound.Committed);
+        Assert.Equal(1, rebound.StateWrites);
+        Assert.NotNull(rebound.Context);
+        Assert.Equal(3, afterRebind?.GoalRevision);
+        Assert.Equal(LiveAdoptionStatuses.AlreadyAdopted, retry.Status);
+        Assert.Equal(metrics, afterRetry);
+        Assert.Single(tasks, static item => item.Key.EntityId == "task-current");
+        Assert.Single(bindings, static item => item.Lifecycle == StateLifecycle.Valid);
+    }
+
+    [Fact]
     public async Task LiveRuntimeLease_WaitsAndDoesNotAdopt()
     {
         await using var project = await TestProject.CreateAsync(ProjectId);
@@ -190,6 +238,9 @@ public sealed class LiveSessionAdoptionTests
         await File.WriteAllTextAsync(taskPath, task);
 
         var result = await Service(project).AdoptAsync(Request(boundary: "RECOVERY_CHECKPOINT"));
+        var beforeRetry = await project.Store.GetMetricsAsync();
+        var retry = await Service(project).AdoptAsync(Request(boundary: "TURN_TERMINAL"));
+        var afterRetry = await project.Store.GetMetricsAsync();
 
         Assert.Equal(LiveAdoptionStatuses.Adopted, result.Status);
         Assert.NotNull(result.ProjectId);
@@ -200,6 +251,9 @@ public sealed class LiveSessionAdoptionTests
         var adoptedTask = await project.Store.ReadAsync(new StateKey(result.ProjectId!, EntityKinds.Task, "legacy-task"));
         Assert.Equal(StateLifecycle.Valid, adoptedTask?.Lifecycle);
         Assert.Equal(LiveSessionAdoptionService.Authority, adoptedTask?.Authority);
+        Assert.Equal(8, adoptedTask?.GoalRevision);
+        Assert.Equal(LiveAdoptionStatuses.AlreadyAdopted, retry.Status);
+        Assert.Equal(beforeRetry, afterRetry);
         var health = await new AdvancedDoctor(project.Store, new ProcessIdentityProbe()).CheckProjectAsync(result.ProjectId!);
         Assert.Equal("HEALTHY", health.Status);
     }

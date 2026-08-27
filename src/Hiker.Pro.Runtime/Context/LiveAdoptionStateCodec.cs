@@ -45,16 +45,24 @@ internal static class LiveAdoptionStateCodec
         TryPayload(json, out var payload) ? payload : new { preserved_source_fingerprint_only = true };
 
     public static string GoalSourceRef(StateSnapshot goal) =>
-        RuntimeStateCodec.IsLegacyImportedFact(goal) || goal.Authority == CommunityCurrentWorkInspector.Authority
+        Provenance(goal, "source_ref") ??
+        (RuntimeStateCodec.IsLegacyImportedFact(goal) || goal.Authority == CommunityCurrentWorkInspector.Authority
             ? ".ai/governance/goal-contract.json"
-            : $"state://goal/{goal.Key.EntityId}";
+            : $"state://goal/{goal.Key.EntityId}");
 
     public static string TaskSourceRef(StateSnapshot task) =>
-        task.Authority == CommunityCurrentWorkInspector.Authority
+        Provenance(task, "source_ref") ??
+        (task.Authority == CommunityCurrentWorkInspector.Authority
             ? ".ai/runtime/task.json"
             : RuntimeStateCodec.IsLegacyImportedFact(task)
                 ? $".ai/tasks/{task.Key.EntityId}.json"
-                : $"state://task/{task.Key.EntityId}";
+                : $"state://task/{task.Key.EntityId}");
+
+    public static string SourceAuthority(StateSnapshot state) =>
+        Provenance(state, "source_authority") ?? state.Authority;
+
+    public static string SourceFingerprint(StateSnapshot state) =>
+        Provenance(state, "source_fingerprint") ?? state.SourceFingerprint;
 
     public static StateMutation Mutation(
         StateKey key,
@@ -93,4 +101,18 @@ internal static class LiveAdoptionStateCodec
 
     public static string Hash(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+
+    private static string? Provenance(StateSnapshot state, string property)
+    {
+        if (!string.Equals(state.Authority, LiveSessionAdoptionService.Authority, StringComparison.Ordinal) ||
+            !TryPayload(state.PayloadJson, out var payload) ||
+            !payload.TryGetProperty(property, out var value) ||
+            value.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(value.GetString()))
+        {
+            return null;
+        }
+
+        return value.GetString();
+    }
 }

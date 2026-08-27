@@ -80,6 +80,19 @@ public sealed class LiveAdoptionCliTests
             Assert.Equal("cli-task", resumed.GetProperty("task_id").GetString());
             Assert.DoesNotContain("raw-provider-session-two", resume.Output, StringComparison.Ordinal);
 
+            var resumeRetry = await RunCliAsync(
+                root,
+                "attach",
+                "--provider",
+                "codex",
+                "--provider-session-id",
+                "raw-provider-session-two",
+                "--boundary-proof",
+                "TURN_TERMINAL");
+            Assert.Equal(0, resumeRetry.ExitCode);
+            Assert.Equal("ALREADY_ADOPTED", Json(resumeRetry.Output).GetProperty("status").GetString());
+            Assert.Equal(0, Json(resumeRetry.Output).GetProperty("state_writes").GetInt32());
+
             var status = await RunCliAsync(root, "status");
             Assert.Equal(0, status.ExitCode);
             Assert.True(Json(status.Output).GetProperty("ok").GetBoolean());

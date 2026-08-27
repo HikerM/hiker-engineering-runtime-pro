@@ -160,22 +160,95 @@ public sealed class LiveSessionAdoptionService(
             string.Equals(bound.GoalId, goal.Key.EntityId, StringComparison.Ordinal) &&
             string.Equals(bound.TaskId, task.Key.EntityId, StringComparison.Ordinal))
         {
+            var revisionRebound = false;
+            if (task.GoalRevision != goal.GoalRevision)
+            {
+                if (!CanRebindGoalRevision(task, goal.Key.EntityId))
+                {
+                    return Result(
+                        LiveAdoptionStatuses.Blocked,
+                        project,
+                        provider,
+                        sessionFingerprint,
+                        goal.Key.EntityId,
+                        task.Key.EntityId,
+                        bound.CheckpointId,
+                        false,
+                        false,
+                        "REVIEW_TASK_GOAL_REVISION",
+                        reads,
+                        0,
+                        null,
+                        new[] { "TASK_GOAL_REVISION_AUTHORITY_CONFLICT" });
+                }
+
+                var rebindOperationId = $"live-adoption-rebind-{LiveAdoptionStateCodec.Hash($"{projectId}\0{task.Key.EntityId}\0{goal.GoalRevision}\0{task.SourceFingerprint}")[..24]}";
+                var rebind = await coordinator.CommitBatchAsync(new BatchTransactionRequest(
+                    rebindOperationId,
+                    new[]
+                    {
+                        new StateMutation(
+                            task.Key,
+                            task.Generation,
+                            goal.GoalRevision,
+                            task.Lifecycle,
+                            task.Authority,
+                            task.SchemaVersion,
+                            task.SourceFingerprint,
+                            task.DependencyFingerprint,
+                            task.PayloadJson,
+                            task.Retention)
+                    },
+                    "LIVE_SESSION_GOAL_REVISION_REBOUND",
+                    "TASK_GOAL_REVISION_ALIGNED",
+                    RuntimeStateCodec.Json(new
+                    {
+                        project_id = projectId,
+                        goal_id = goal.Key.EntityId,
+                        task_id = task.Key.EntityId,
+                        goal_revision = goal.GoalRevision
+                    })), cancellationToken).ConfigureAwait(false);
+                if (!rebind.Committed)
+                {
+                    return Result(
+                        LiveAdoptionStatuses.Blocked,
+                        project,
+                        provider,
+                        sessionFingerprint,
+                        goal.Key.EntityId,
+                        task.Key.EntityId,
+                        bound.CheckpointId,
+                        false,
+                        false,
+                        "RETRY_SAME_REVISION_REBIND_OPERATION",
+                        reads,
+                        0,
+                        null,
+                        new[] { rebind.Status });
+                }
+
+                task = await store.ReadAsync(task.Key, cancellationToken).ConfigureAwait(false)
+                    ?? throw new InvalidOperationException("Rebound task disappeared after committed adoption repair");
+                reads++;
+                revisionRebound = rebind.Status != "IDEMPOTENT_REPLAY";
+            }
+
             var context = await new ContextResolver(store, _clock).ResolveAsync(
                 new ContextRequest(projectId, task.Key.EntityId, goal.Key.EntityId, request.MaxContextBytes, 32),
                 cancellationToken).ConfigureAwait(false);
             return Result(
-                LiveAdoptionStatuses.AlreadyAdopted,
+                revisionRebound ? LiveAdoptionStatuses.Adopted : LiveAdoptionStatuses.AlreadyAdopted,
                 project,
                 provider,
                 sessionFingerprint,
                 goal.Key.EntityId,
                 task.Key.EntityId,
                 bound.CheckpointId,
-                false,
-                true,
+                revisionRebound,
+                !revisionRebound,
                 "CONTINUE_BOUND_TASK",
                 reads + context.StateReads,
-                0,
+                revisionRebound ? 1 : 0,
                 context,
                 Array.Empty<string>());
         }
@@ -339,8 +412,8 @@ public sealed class LiveSessionAdoptionService(
                     goal.Key.EntityId,
                     "CURRENT",
                     goal.GoalRevision,
-                    goal.Authority,
-                    goal.SourceFingerprint,
+                    SourceAuthority(goal),
+                    SourceFingerprint(goal),
                     GoalSourceRef(goal),
                     SourcePayload(goal.PayloadJson))));
         }
@@ -348,7 +421,7 @@ public sealed class LiveSessionAdoptionService(
         mutations.Add(Mutation(
             task.Key,
             task,
-            Math.Max(task.GoalRevision, goal.GoalRevision),
+            goal.GoalRevision,
             sourceFingerprint,
             new AdoptedTaskState(
                 "hiker-live-task/v1",
@@ -358,8 +431,8 @@ public sealed class LiveSessionAdoptionService(
                 bindingId,
                 executionId,
                 checkpointId,
-                task.Authority,
-                task.SourceFingerprint,
+                SourceAuthority(task),
+                SourceFingerprint(task),
                 TaskSourceRef(task),
                 now)));
         mutations.Add(Mutation(
@@ -536,6 +609,21 @@ public sealed class LiveSessionAdoptionService(
         {
             throw new ArgumentException("Live adoption request is invalid", nameof(request));
         }
+    }
+
+    private static bool CanRebindGoalRevision(StateSnapshot task, string goalId)
+    {
+        if (task.Lifecycle != StateLifecycle.Valid ||
+            !string.Equals(task.Authority, Authority, StringComparison.Ordinal) ||
+            !string.Equals(task.SchemaVersion, SqliteSchema.CurrentVersion, StringComparison.Ordinal) ||
+            !LiveAdoptionStateCodec.TryPayload(task.PayloadJson, out var payload))
+        {
+            return false;
+        }
+
+        return payload.TryGetProperty("goal_id", out var boundGoal) &&
+               boundGoal.ValueKind == JsonValueKind.String &&
+               string.Equals(boundGoal.GetString(), goalId, StringComparison.Ordinal);
     }
 
 }

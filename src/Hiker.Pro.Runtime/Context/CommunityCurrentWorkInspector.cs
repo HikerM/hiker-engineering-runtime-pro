@@ -25,8 +25,8 @@ internal sealed class CommunityCurrentWorkInspector(ProjectLayout layout, IState
         var taskCurrent = await store.ReadAsync(taskKey, cancellationToken).ConfigureAwait(false);
         var revision = Revision(goalSource.Payload);
         return new CommunityCurrentWork(
-            Snapshot(goalKey, goalCurrent, revision, goalSource),
-            Snapshot(taskKey, taskCurrent, Math.Max(revision, Revision(taskSource.Payload)), taskSource),
+            SnapshotOrCurrent(goalKey, goalCurrent, revision, goalSource),
+            SnapshotOrCurrent(taskKey, taskCurrent, Math.Max(revision, Revision(taskSource.Payload)), taskSource),
             4);
     }
 
@@ -72,6 +72,47 @@ internal sealed class CommunityCurrentWorkInspector(ProjectLayout layout, IState
         source.Json,
         source.LastWriteAt,
         RetentionTier.Hot);
+
+    private static StateSnapshot SnapshotOrCurrent(
+        StateKey key,
+        StateSnapshot? current,
+        long revision,
+        CommunitySource source)
+    {
+        if (current is { Lifecycle: StateLifecycle.Valid } &&
+            string.Equals(current.Authority, LiveSessionAdoptionService.Authority, StringComparison.Ordinal) &&
+            string.Equals(current.SchemaVersion, SqliteSchema.CurrentVersion, StringComparison.Ordinal) &&
+            TrySourceFingerprint(current.PayloadJson, out var adoptedSource) &&
+            string.Equals(adoptedSource, source.Fingerprint, StringComparison.Ordinal))
+        {
+            return current;
+        }
+
+        return Snapshot(key, current, revision, source);
+    }
+
+    private static bool TrySourceFingerprint(string payloadJson, out string sourceFingerprint)
+    {
+        sourceFingerprint = string.Empty;
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("source_fingerprint", out var fingerprint) ||
+                fingerprint.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(fingerprint.GetString()))
+            {
+                return false;
+            }
+
+            sourceFingerprint = fingerprint.GetString()!;
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 
     private static string? Token(JsonElement payload, params string[] properties)
     {
