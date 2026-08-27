@@ -27,8 +27,8 @@ public sealed class AdvancedDoctor(
         List<HealthFinding> findings,
         CancellationToken cancellationToken)
     {
-        var ownership = await stateStore.ReadAsync(projectId, EntityKinds.Ownership, StateLifecycle.Valid, 1000, cancellationToken).ConfigureAwait(false);
-        var worktrees = await stateStore.ReadAsync(projectId, EntityKinds.Worktree, StateLifecycle.Valid, 1000, cancellationToken).ConfigureAwait(false);
+        var ownership = await stateStore.ReadAsync(projectId, EntityKinds.Ownership, lifecycle: null, 1000, cancellationToken).ConfigureAwait(false);
+        var worktrees = await stateStore.ReadAsync(projectId, EntityKinds.Worktree, lifecycle: null, 1000, cancellationToken).ConfigureAwait(false);
         var ownershipByTask = ParseByTask<RuntimeOwnershipState>(ownership, static state => state.TaskId, findings, "INVALID_OWNERSHIP_STATE");
         var worktreesByTask = ParseByTask<RuntimeWorktreeState>(worktrees, static state => state.TaskId, findings, "INVALID_WORKTREE_STATE");
         foreach (var duplicate in worktreesByTask.Where(static item => item.Value.Count > 1))
@@ -84,10 +84,30 @@ public sealed class AdvancedDoctor(
         var values = new Dictionary<string, List<T>>(StringComparer.Ordinal);
         foreach (var snapshot in snapshots)
         {
+            if (RuntimeStateCodec.IsLegacyImportedFact(snapshot))
+            {
+                findings.Add(new HealthFinding(
+                    "LEGACY_IMPORTED_STATE_REQUIRES_REVIEW",
+                    "BLOCKED",
+                    snapshot.Key.EntityId,
+                    $"{snapshot.Key.Kind} authority={snapshot.Authority} schema={snapshot.SchemaVersion} lifecycle={snapshot.Lifecycle}",
+                    false));
+                continue;
+            }
+
+            if (snapshot.Lifecycle != StateLifecycle.Valid)
+            {
+                continue;
+            }
+
             try
             {
                 var value = RuntimeStateCodec.Parse<T>(snapshot);
                 var key = taskId(value);
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    throw new InvalidDataException($"{snapshot.Key.Kind} requires task_id");
+                }
                 if (!values.TryGetValue(key, out var items))
                 {
                     items = new List<T>();
@@ -98,7 +118,7 @@ public sealed class AdvancedDoctor(
             }
             catch (Exception exception) when (exception is System.Text.Json.JsonException or InvalidDataException)
             {
-                findings.Add(new HealthFinding(findingCode, "BLOCKED", snapshot.Key.EntityId, exception.GetType().Name, false));
+                findings.Add(new HealthFinding(findingCode, "BLOCKED", snapshot.Key.EntityId, exception.Message, false));
             }
         }
 

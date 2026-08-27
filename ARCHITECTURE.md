@@ -22,3 +22,5 @@ Hiker 5.19 Pro 是本地编译的长期自主软件工程运行时。它不替�
 - [Community / Pro Boundary](docs/architecture/community-pro-boundary.md)
 
 商业边界：公开的 Community 5.18 不包含 Pro 源码；Pro 私有仓库不保存发行私钥。`.ai` 属于用户，License 失效只能限制 Pro 高级执行，不能删除、锁死或损坏状态、Git、Worktree 或 Evidence。
+
+Legacy 迁移边界：`COMMUNITY_5_18_IMPORT` authority 表示只读历史事实，不是活动 Runtime authority。Community aggregate Ownership 与 Task Map 以 `Incompatible` 生命周期保留；既有 rc.1 数据即使仍为 `Valid`，Runtime Codec 也会拒绝将其解释为活动 Writer、Lease 或 Worktree。只有 `RUNTIME_COORDINATOR` 生成且通过必填字段验证的状态可参与当前运行时协调。

@@ -78,7 +78,7 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
                     key,
                     0,
                     GoalRevision(payload),
-                    StateLifecycle.Valid,
+                    LegacyLifecycle(source.Kind),
                     "COMMUNITY_5_18_IMPORT",
                     "2.0.0",
                     sourceHash,
@@ -212,6 +212,11 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
 
         return 0;
     }
+
+    private static StateLifecycle LegacyLifecycle(string kind) =>
+        kind is EntityKinds.Ownership or EntityKinds.Worktree
+            ? StateLifecycle.Incompatible
+            : StateLifecycle.Valid;
 
     private static string Sha256(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 }

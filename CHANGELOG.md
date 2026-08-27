@@ -1,5 +1,20 @@
 # Changelog
 
+## 5.19.0-rc.2 — 2026-08-27
+
+### Fixed
+
+- `FIELD-5.19-001`：Community 5.18 aggregate Ownership / Task Map 不再被解释为活动 5.19 Runtime Ownership / Worktree。
+- Project-scoped `doctor/status` 对 Legacy 或缺失必填标识符的状态返回结构化、可诊断的 Health Finding，不再抛出 `ArgumentNullException(key)`。
+- rc.1 已导入且生命周期仍为 `Valid` 的 Legacy 事实可被只读识别；新导入的同类事实标记为 `Incompatible`，payload、source fingerprint、migration marker 与幂等语义保持不变。
+- Project Resume 不再把 Legacy Task Map 暴露为活动 Worktree。
+
+### Verification
+
+- Pro Runtime：82/82 PASS，其中新增 13 项 Field Fixture、CLI 链路、混合状态、幂等迁移与 Backup/Restore 回归。
+- Community 5.18：五插件 297/297 PASS，公开源码工作区无残留差异。
+- 真实项目只读复检在 rc.2 完整 Release Gate 后执行，本文不提前声明现场通过。
+
 ## 5.19.0-rc.1 — 2026-08-26
 
 ### Added

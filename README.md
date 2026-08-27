@@ -17,7 +17,7 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 
 | 项目 | 当前值 |
 | --- | --- |
-| Pro 产品版本 | `5.19.0-rc.1` |
+| Pro 产品版本 | `5.19.0-rc.2` |
 | Runtime 版本 | `0.1.0` |
 | State Schema | `3.0.0` |
 | Runtime | .NET 9，本地编译 CLI / Runtime |
@@ -57,13 +57,15 @@ Context Resolver、`hiker resume`、结构化 Decision Memory、Intent/Dependenc
 
 这些结果分别属于 `DETERMINISTIC_VERIFIED`、`SIMULATION_PROVEN` 或 `REAL_INTEGRATION_PROVEN`；不等于客户现场长期运行。当前是发布候选，最终状态只由同一提交生成的商业 Gate 决定。
 
+Community 5.18 导入的 aggregate Ownership / Task Map 仅作为 `LEGACY_IMPORTED_FACT` 保留，不会被激活为 5.19 Runtime Writer 或 Worktree。项目级 `doctor/status` 会对不兼容 Legacy 状态返回结构化 Finding，而不是因缺失运行时标识符而崩溃。
+
 ## 当前验证结果
 
-以下为 2026-08-26 的本地可重复证据；原始机器相关 JSON 保存在被 Git 忽略的 `artifacts/verification/`。
+以下为 2026-08-27 的本地可重复证据；原始机器相关 JSON 保存在被 Git 忽略的 `artifacts/verification/`。
 
 | 验证面 | 结果 | 证据等级 |
 | --- | --- | --- |
-| Unit / Integration | 当前源码 69/69 PASS；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
+| Unit / Integration | 当前源码 82/82 PASS（含 13 项 `FIELD-5.19-001` 回归）；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
 | Community 5.18 回归 | 五插件合计 297/297 PASS，公开工作区保持干净 | `DETERMINISTIC_VERIFIED` |
 | 加速老化 | 12 个合成月份、1201 Task、120 Goal Revision、120 Handoff、60 Crash | `SIMULATION_PROVEN` |
 | 并发写入 | 1/2/4/8 Worker 均恰好一个 CAS 成功；Runtime Worker 结果需由当前提交重跑确认 | `SIMULATION_PROVEN` |

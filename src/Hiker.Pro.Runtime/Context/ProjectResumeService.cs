@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Hiker.Pro.Execution;
 using Hiker.Pro.State;
 
 namespace Hiker.Pro.Context;
@@ -16,7 +17,9 @@ public sealed class ProjectResumeService(IStateStore stateStore)
         var tasks = await stateStore.ReadAsync(projectId, EntityKinds.Task, StateLifecycle.Valid, 100, cancellationToken).ConfigureAwait(false);
         var decisions = await stateStore.ReadAsync(projectId, EntityKinds.Decision, StateLifecycle.Valid, 20, cancellationToken).ConfigureAwait(false);
         var evidence = await stateStore.ReadAsync(projectId, EntityKinds.Evidence, lifecycle: null, limit: 100, cancellationToken).ConfigureAwait(false);
-        var worktrees = await stateStore.ReadAsync(projectId, EntityKinds.Worktree, StateLifecycle.Valid, 32, cancellationToken).ConfigureAwait(false);
+        var worktrees = (await stateStore.ReadAsync(projectId, EntityKinds.Worktree, StateLifecycle.Valid, 32, cancellationToken).ConfigureAwait(false))
+            .Where(static state => !RuntimeStateCodec.IsLegacyImportedFact(state))
+            .ToArray();
         var leases = await stateStore.ReadAsync(projectId, EntityKinds.RuntimeLease, StateLifecycle.Valid, 32, cancellationToken).ConfigureAwait(false);
         var open = tasks.Where(static task => !PayloadStatus(task.PayloadJson, "COMPLETED", "CANCELLED", "FAILED")).Take(32).Select(ToHot).ToArray();
         var blocked = tasks.Where(static task => PayloadStatus(task.PayloadJson, "BLOCKED", "INTERRUPTED")).Take(32).Select(ToHot).ToArray();
