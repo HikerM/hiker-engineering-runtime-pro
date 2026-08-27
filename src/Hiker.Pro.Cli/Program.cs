@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Hiker.Pro.Context;
 using Hiker.Pro.Release;
 
 var options = new JsonSerializerOptions
@@ -18,7 +19,20 @@ if (args.Length == 0 || args[0] is "help" or "--help" or "-h")
 if (args[0] == "version")
 {
     var version = BuildVersionFacts.Current;
-    Console.WriteLine($"{version.Product} runtime/{version.Runtime} schema/{version.StateSchema}");
+    if (args.Contains("--json", StringComparer.Ordinal))
+    {
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            product_version = version.Product,
+            runtime_api_version = version.Runtime,
+            state_schema_version = version.StateSchema,
+            live_adoption_protocol = LiveAdoptionProtocol.CurrentVersion
+        }, options));
+    }
+    else
+    {
+        Console.WriteLine($"{version.Product} runtime/{version.Runtime} schema/{version.StateSchema}");
+    }
     return 0;
 }
 

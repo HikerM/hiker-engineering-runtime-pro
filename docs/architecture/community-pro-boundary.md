@@ -29,6 +29,8 @@ GitHub Metadata已于2026-08-26验证Pro仓库：`private=true`、`visibility=PR
 
 Pro可以读取Community版本、公开Schema与公开CLI结果，但不得把Community仓库变成Pro源码托管或隐蔽下载器。Community在没有Pro时继续完整工作。Pro失效或License失效时，用户仍可读取、备份、导出和恢复`.ai`，并继续使用Community能力。
 
+Community→Pro 接管使用显式能力握手，而不是只比较产品版本号。Community 仅调用 `hiker version --json` 并要求当前 `live_adoption_protocol`；不支持该握手或协议版本不匹配的旧 RC 必须静默回退 Community，不能尝试写 State。Community 不包含 Goal/Task/Checkpoint、CAS、Ownership、Recovery 或 Context Resolver 的 Pro 实现。
+
 ## 密钥边界
 
 - 发行签名私钥和License签名私钥只存在于外部受控签名环境；

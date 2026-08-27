@@ -2,6 +2,11 @@ using Hiker.Pro.State;
 
 namespace Hiker.Pro.Context;
 
+public static class LiveAdoptionProtocol
+{
+    public const int CurrentVersion = 2;
+}
+
 public static class LiveAdoptionStatuses
 {
     public const string Adopted = "LIVE_SESSION_ADOPTED";

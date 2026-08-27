@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Hiker.Pro.Context;
 using Hiker.Pro.Release;
 using Xunit;
 
@@ -56,11 +57,21 @@ public sealed class SelfContainedRuntimeTests
                 ["DOTNET_MULTILEVEL_LOOKUP"] = "0"
             };
             var version = await RunAsync(Path.Combine(output, "hiker.exe"), output, new[] { "version" }, isolated, TimeSpan.FromMinutes(1));
+            var protocol = await RunAsync(Path.Combine(output, "hiker.exe"), output, new[] { "version", "--json" }, isolated, TimeSpan.FromMinutes(1));
             var init = await RunAsync(Path.Combine(output, "hiker.exe"), output, new[] { "init", "--root", project }, isolated, TimeSpan.FromMinutes(1));
             var status = await RunAsync(Path.Combine(output, "hiker.exe"), output, new[] { "status", "--root", project }, isolated, TimeSpan.FromMinutes(1));
 
             Assert.Equal(0, version.ExitCode);
             Assert.Equal($"{BuildVersionFacts.Current.Product} runtime/{BuildVersionFacts.Current.Runtime} schema/{BuildVersionFacts.Current.StateSchema}", version.StandardOutput.Trim());
+            Assert.Equal(0, protocol.ExitCode);
+            using (var protocolDocument = JsonDocument.Parse(protocol.StandardOutput))
+            {
+                var protocolRoot = protocolDocument.RootElement;
+                Assert.Equal(BuildVersionFacts.Current.Product, protocolRoot.GetProperty("product_version").GetString());
+                Assert.Equal(BuildVersionFacts.Current.Runtime, protocolRoot.GetProperty("runtime_api_version").GetString());
+                Assert.Equal(BuildVersionFacts.Current.StateSchema, protocolRoot.GetProperty("state_schema_version").GetString());
+                Assert.Equal(LiveAdoptionProtocol.CurrentVersion, protocolRoot.GetProperty("live_adoption_protocol").GetInt32());
+            }
             Assert.Equal(0, init.ExitCode);
             Assert.Contains("INITIALIZED", init.StandardOutput, StringComparison.Ordinal);
             Assert.Equal(0, status.ExitCode);
