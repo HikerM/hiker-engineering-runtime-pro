@@ -1,14 +1,14 @@
 # Hiker 5.19 Pro Project State
 
-- Product: `5.19.0-rc.2`
+- Product: `5.19.0-rc.3`
 - Runtime: `0.1.0`
 - State Schema: `3.0.0`
-- Branch: `main`
+- Release branch requirement: `main`
 - Repository: `HikerM/hiker-engineering-runtime-pro`
 - Visibility requirement: `PRIVATE`
 - Phase: `COMMERCIAL_RELEASE_CANDIDATE`
 - Field proof: `NOT_YET_FIELD_PROVEN`
-- Active release blocker: `FIELD-5.19-001` requires the rc.2 package Gate and read-only Field recheck before closure.
+- Active release blocker: rc.3 仍需在干净且与 `origin/main` 一致的发布提交上重建签名 ZIP、完整证据和商业 Gate；当前功能分支证据不能替代正式发布 Gate。
 
 本文件记录候选身份，不静态宣称发布 Gate 已通过。最终状态必须读取同一源码提交生成的本地 `artifacts/verification/commercial-release-gate.json`；该文件被 Git 忽略，避免把机器路径、运行时间或一次性签名证据提交到源码历史。
 

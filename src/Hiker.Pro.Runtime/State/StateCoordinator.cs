@@ -120,6 +120,9 @@ public sealed class StateCoordinator
     public Task<MigrationResult> MigrateAsync(string targetVersion, CancellationToken cancellationToken = default) =>
         WithWriterAsync(token => _store.MigrateAsync(targetVersion, token), cancellationToken);
 
+    public Task<ProjectForkResult> ForkProjectAsync(ProjectForkRequest request, CancellationToken cancellationToken = default) =>
+        WithWriterAsync(token => _store.ForkProjectAsync(request, token), cancellationToken);
+
     public Task<RepairReport> RepairAsync(CancellationToken cancellationToken = default) =>
         WithWriterAsync(token => _store.RepairAsync(token), cancellationToken);
 

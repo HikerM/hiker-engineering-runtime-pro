@@ -25,7 +25,13 @@ internal sealed class CommercialReleaseGate
         "DoctorRepairDropsOnlyInvalidProjectionAndGcRemovesAgedOrphanArtifact",
         "ContextResolver_CostDependsOnTaskEdgesNotColdHistorySize",
         "SqlitePerformance_UsesRealQueryPlansConcurrencyAndNPlusOneEvidence",
-        "SensitiveContentPolicy_DetectsDirectAndEscapedHomesWithoutFlaggingProductIdentifiers"
+        "SensitiveContentPolicy_DetectsDirectAndEscapedHomesWithoutFlaggingProductIdentifiers",
+        "ReadOnlyPreflight_NewProjectDoesNotCreateAiOrIdentity",
+        "Init_GeneratesIdentityOnceAndRepeatedInitReusesIt",
+        "ImportedLegacyNamespace_ResolvesSameIdentityWithoutReadSideWrite",
+        "ExplicitFork_CreatesNewIdentityInheritsFactsAndResetsOperationalState",
+        "SelfContainedWinX64Publish_RunsWithoutMachineDotnet",
+        "ReleaseBuilderAndVerifier_RequireSelfContainedRuntime"
     };
     private static readonly IReadOnlyDictionary<string, string[]> RequiredReports = new Dictionary<string, string[]>(StringComparer.Ordinal)
     {
@@ -142,7 +148,7 @@ internal sealed class CommercialReleaseGate
             static item => item.GetProperty("id").GetString() ?? string.Empty,
             static item => item.GetProperty("status").GetString() ?? string.Empty,
             StringComparer.Ordinal);
-        var required = new[] { "PACKAGE_CHECKSUM", "TRUST_ROOT", "PACKAGE_SIGNATURE_AND_HASHES", "VERSION_FACTS", "PACKAGE_PRIVACY_AND_SOURCE_BOUNDARY", "CLEAN_INSTALL", "PACKAGE_TAMPER_REJECTION" };
+        var required = new[] { "PACKAGE_CHECKSUM", "TRUST_ROOT", "PACKAGE_SIGNATURE_AND_HASHES", "VERSION_FACTS", "SELF_CONTAINED_RUNTIME", "PACKAGE_PRIVACY_AND_SOURCE_BOUNDARY", "CLEAN_INSTALL", "PACKAGE_TAMPER_REJECTION" };
         var pass = root.GetProperty("status").GetString() == "PASS" &&
                    root.GetProperty("productVersion").GetString() == productVersion &&
                    root.GetProperty("gitCommit").GetString() == head &&

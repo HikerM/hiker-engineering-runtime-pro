@@ -43,6 +43,8 @@ internal sealed class CodexRuntimeScenario(VerificationOptions options)
             await using var store = new SqliteStateStore(layout);
             await store.InitializeAsync().ConfigureAwait(false);
             var state = new StateCoordinator(store);
+            var bootstrap = new ProjectBootstrapService(layout, store, state);
+            _ = await bootstrap.InitializeAsync("codex-e2e").ConfigureAwait(false);
             var inputDirectory = Path.Combine(layout.AiRoot, "runtime-input");
             Directory.CreateDirectory(inputDirectory);
             await File.WriteAllTextAsync(
@@ -58,7 +60,7 @@ internal sealed class CodexRuntimeScenario(VerificationOptions options)
                 throw new InvalidOperationException($"Codex CLI unavailable: {probe.Status}");
             }
 
-            var coordinator = new RuntimeCoordinator(state, inspector, new ProcessIdentityProbe());
+            var coordinator = new RuntimeCoordinator(state, inspector, new ProcessIdentityProbe(), bootstrap);
             var startedAt = Stopwatch.StartNew();
             var started = await coordinator.StartAsync(
                 "codex-e2e-start",

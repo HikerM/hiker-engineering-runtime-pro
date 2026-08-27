@@ -8,7 +8,7 @@ namespace Hiker.Pro.Verification;
 
 internal sealed record RuntimeWorkerResult(int Started, int Completed, int Failures, double DurationMs);
 
-internal sealed class RuntimeWorkerSimulation(StateCoordinator state, string root)
+internal sealed class RuntimeWorkerSimulation(StateCoordinator state, ProjectBootstrapService bootstrap, string root)
 {
     public async Task<IReadOnlyDictionary<int, RuntimeWorkerResult>> RunAsync()
     {
@@ -35,7 +35,7 @@ internal sealed class RuntimeWorkerSimulation(StateCoordinator state, string roo
         var workspace = Path.Combine(root, "runtime-workers", groupSize.ToString(System.Globalization.CultureInfo.InvariantCulture), index.ToString(System.Globalization.CultureInfo.InvariantCulture));
         Directory.CreateDirectory(workspace);
         var adapter = new VerificationRuntimeAdapter($"verification-adapter-{groupSize}-{index}");
-        var coordinator = new RuntimeCoordinator(state, new VerificationWorkspaceInspector(), new ProcessIdentityProbe());
+        var coordinator = new RuntimeCoordinator(state, new VerificationWorkspaceInspector(), new ProcessIdentityProbe(), bootstrap);
         var start = await coordinator.StartAsync(
             $"runtime-worker-start-{groupSize}-{index}",
             new RuntimeStartRequest(

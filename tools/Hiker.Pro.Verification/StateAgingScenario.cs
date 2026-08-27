@@ -24,6 +24,8 @@ internal sealed class StateAgingScenario
             await using var store = new SqliteStateStore(layout);
             await store.InitializeAsync().ConfigureAwait(false);
             var state = new StateCoordinator(store);
+            var bootstrap = new ProjectBootstrapService(layout, store, state);
+            _ = await bootstrap.InitializeAsync(ProjectId).ConfigureAwait(false);
             await SeedTopologyAsync(store).ConfigureAwait(false);
             var resolver = new ContextResolver(store);
             var resume = new ProjectResumeService(store);
@@ -52,7 +54,7 @@ internal sealed class StateAgingScenario
             healthWatch.Stop();
             var metrics = await store.GetMetricsAsync().ConfigureAwait(false);
             var concurrency = await VerifyConcurrentWritersAsync(store).ConfigureAwait(false);
-            var runtimeWorkers = await new RuntimeWorkerSimulation(state, root).RunAsync().ConfigureAwait(false);
+            var runtimeWorkers = await new RuntimeWorkerSimulation(state, bootstrap, root).RunAsync().ConfigureAwait(false);
             var finalContext = await resolver.ResolveAsync(new ContextRequest(ProjectId, ActiveTaskId, GoalId)).ConfigureAwait(false);
             var aiBytes = Directory.EnumerateFiles(layout.AiRoot, "*", SearchOption.AllDirectories)
                 .Sum(static path => new FileInfo(path).Length);

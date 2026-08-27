@@ -9,6 +9,7 @@ public sealed class RuntimeCoordinator(
     StateCoordinator coordinator,
     IWorkspaceInspector workspaceInspector,
     ProcessIdentityProbe processProbe,
+    ProjectBootstrapService bootstrap,
     TimeProvider? timeProvider = null)
 {
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
@@ -20,6 +21,15 @@ public sealed class RuntimeCoordinator(
         CancellationToken cancellationToken = default)
     {
         ValidateStart(request, adapter);
+        var project = await bootstrap.RequireActiveAsync(
+            ProjectBootstrapIntent.RuntimeStart,
+            request.ProjectId,
+            cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(project.ProjectId, request.ProjectId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Runtime project identity does not match the active project");
+        }
+
         var workspace = await workspaceInspector.InspectAsync(request.WorkspacePath, cancellationToken).ConfigureAwait(false);
         await ValidateWorktreeConflictsAsync(request, workspace, cancellationToken).ConfigureAwait(false);
         var keys = RuntimeKeys(request.ProjectId, request.TaskId, request.RuntimeId, request.WorktreeId);

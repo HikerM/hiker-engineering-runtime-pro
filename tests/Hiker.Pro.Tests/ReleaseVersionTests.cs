@@ -53,6 +53,20 @@ public sealed class ReleaseVersionTests
         Assert.Empty(bypasses);
     }
 
+    [Fact]
+    public void ReleaseBuilderAndVerifier_RequireSelfContainedRuntime()
+    {
+        var root = FindRepositoryRoot();
+        var builder = File.ReadAllText(Path.Combine(root, "tools", "Hiker.Pro.Release", "ReleasePackageBuilder.cs"));
+        var verifier = File.ReadAllText(Path.Combine(root, "tools", "Hiker.Pro.Release", "ReleasePackageVerifier.cs"));
+        var gate = File.ReadAllText(Path.Combine(root, "tools", "Hiker.Pro.Release", "CommercialReleaseGate.cs"));
+
+        Assert.Contains("\"--self-contained\", \"true\"", builder, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"--self-contained\", \"false\"", builder, StringComparison.Ordinal);
+        Assert.Contains("SELF_CONTAINED_RUNTIME", verifier, StringComparison.Ordinal);
+        Assert.Contains("SELF_CONTAINED_RUNTIME", gate, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

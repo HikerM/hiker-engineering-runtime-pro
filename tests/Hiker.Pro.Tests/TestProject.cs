@@ -10,21 +10,29 @@ internal sealed class TestProject : IAsyncDisposable
         Layout = new ProjectLayout(root);
         Store = store;
         Coordinator = new StateCoordinator(store);
+        Bootstrap = new ProjectBootstrapService(Layout, Store, Coordinator);
     }
 
     public string Root { get; }
     public ProjectLayout Layout { get; }
     public SqliteStateStore Store { get; }
     public StateCoordinator Coordinator { get; }
+    public ProjectBootstrapService Bootstrap { get; }
 
-    public static async Task<TestProject> CreateAsync()
+    public static async Task<TestProject> CreateAsync(string? projectId = null)
     {
         var root = Path.Combine(Path.GetTempPath(), $"hiker-pro-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
         var layout = new ProjectLayout(root);
         var store = new SqliteStateStore(layout);
         await store.InitializeAsync().ConfigureAwait(false);
-        return new TestProject(root, store);
+        var project = new TestProject(root, store);
+        if (projectId is not null)
+        {
+            _ = await project.Bootstrap.InitializeAsync(projectId).ConfigureAwait(false);
+        }
+
+        return project;
     }
 
     public async ValueTask DisposeAsync()

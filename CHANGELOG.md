@@ -1,5 +1,22 @@
 # Changelog
 
+## 5.19.0-rc.3 — Unreleased
+
+### Added
+
+- `GA-5.19-IDENTITY-001`：统一 Project Bootstrap/Preflight，覆盖新项目、Community 5.18 Legacy、活动项目、移动、显式 Fork、Identity 缺失/冲突/不匹配、损坏状态和未完成迁移。
+- `PROJECT/hiker-project-identity` 成为稳定身份事实；普通读命令不创建 UUID，Runtime Start 不能绕过 Preflight，显式 Fork 原子继承可复用事实并重置运行绑定。
+- `GA-5.19-RUNTIME-001`：Windows x64 Release 改为目录式 self-contained .NET 9 Runtime，新增无全局 .NET 环境执行与包内 Runtime 完整性 Gate。
+
+### Compatibility
+
+- 现有 Community 5.18 导入数据库在缺少正式 Identity 实体时，从唯一 state namespace 与完整 migration marker 只读恢复原 Project ID；不会生成第二个 UUID或重复导入。
+- Legacy 源文件、冷归档和现有 `.ai` 内容不被默认删除、清空或重建。
+
+### Verification
+
+- 当前私有源码完整 Unit / Integration：98/98 PASS；包含新建/重复初始化、Legacy namespace 恢复、Identity 缺失/冲突/不匹配、移动、显式 Fork、迁移中断、损坏数据库和无机器级 .NET 的真实 `win-x64` publish 执行。
+
 ## 5.19.0-rc.2 — 2026-08-27
 
 ### Fixed

@@ -9,7 +9,8 @@ internal static class ProcessRunner
         string workingDirectory,
         IEnumerable<string> arguments,
         TimeSpan timeout,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string?>? environment = null)
     {
         using var process = new Process
         {
@@ -26,6 +27,14 @@ internal static class ProcessRunner
         foreach (var argument in arguments)
         {
             process.StartInfo.ArgumentList.Add(argument);
+        }
+        if (environment is not null)
+        {
+            foreach (var item in environment)
+            {
+                if (item.Value is null) process.StartInfo.Environment.Remove(item.Key);
+                else process.StartInfo.Environment[item.Key] = item.Value;
+            }
         }
 
         var started = Stopwatch.StartNew();
@@ -57,9 +66,10 @@ internal static class ProcessRunner
         string workingDirectory,
         IEnumerable<string> arguments,
         TimeSpan timeout,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string?>? environment = null)
     {
-        var result = await RunAsync(executable, workingDirectory, arguments, timeout, cancellationToken).ConfigureAwait(false);
+        var result = await RunAsync(executable, workingDirectory, arguments, timeout, cancellationToken, environment).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
             throw new InvalidOperationException(

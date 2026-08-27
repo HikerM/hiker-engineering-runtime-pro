@@ -150,7 +150,7 @@ public sealed class Field519001LegacyMigrationTests
         await File.WriteAllTextAsync(Path.Combine(governance, "ownership.json"), "{\"schema_version\":\"3.0.0\",\"rules\":[]}");
         await File.WriteAllTextAsync(Path.Combine(workspace, "task-map.json"), "{\"schema_version\":\"3.0.0\",\"status\":\"ACCEPTED\",\"lanes\":[]}");
         Assert.Equal("IMPORTED", (await new Community518Importer(project.Layout, project.Coordinator).ImportAsync(ProjectId)).Status);
-        var started = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe())
+        var started = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe(), project.Bootstrap)
             .StartAsync("field-start", Start(project.Root), new TestRuntimeAdapter("field-adapter"));
 
         var health = await new AdvancedDoctor(project.Store, new ProcessIdentityProbe()).CheckProjectAsync(ProjectId);
@@ -168,8 +168,8 @@ public sealed class Field519001LegacyMigrationTests
     [Fact]
     public async Task ValidActiveOwnershipAndWorktree_KeepProjectDoctorHealthy()
     {
-        await using var project = await TestProject.CreateAsync();
-        var started = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe())
+        await using var project = await TestProject.CreateAsync(ProjectId);
+        var started = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe(), project.Bootstrap)
             .StartAsync("valid-start", Start(project.Root), new TestRuntimeAdapter("valid-adapter"));
 
         var health = await new AdvancedDoctor(project.Store, new ProcessIdentityProbe()).CheckProjectAsync(ProjectId);
@@ -263,10 +263,10 @@ public sealed class Field519001LegacyMigrationTests
 
             Assert.Equal(0, firstImport.ExitCode);
             Assert.Equal("IMPORTED", Json(firstImport.Output).GetProperty("import").GetProperty("status").GetString());
-            Assert.Equal(0, doctor.ExitCode);
-            Assert.Equal("HEALTHY", Json(doctor.Output).GetProperty("status").GetString());
-            Assert.Equal(0, status.ExitCode);
-            Assert.True(Json(status.Output).GetProperty("ok").GetBoolean());
+            Assert.Equal(2, doctor.ExitCode);
+            Assert.Equal("BLOCKED", Json(doctor.Output).GetProperty("status").GetString());
+            Assert.Equal(2, status.ExitCode);
+            Assert.False(Json(status.Output).GetProperty("ok").GetBoolean());
             Assert.Equal(2, projectDoctor.ExitCode);
             Assert.Equal("BLOCKED", Json(projectDoctor.Output).GetProperty("status").GetString());
             Assert.Equal(2, Json(projectDoctor.Output).GetProperty("findings").GetArrayLength());

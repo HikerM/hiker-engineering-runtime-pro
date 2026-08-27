@@ -17,10 +17,10 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 
 | 项目 | 当前值 |
 | --- | --- |
-| Pro 产品版本 | `5.19.0-rc.2` |
+| Pro 产品版本 | `5.19.0-rc.3` |
 | Runtime 版本 | `0.1.0` |
 | State Schema | `3.0.0` |
-| Runtime | .NET 9，本地编译 CLI / Runtime |
+| Runtime | .NET 9；`win-x64` 发行包自包含 Runtime，目标机无需预装 .NET |
 | Community 基线 | `HikerM/hiker-workflow-skill-pack` `main@05e94e32af719c81f740fe2af08c35f98a527588` |
 | Community 版本 | `5.18.0+codex.20260826161321` |
 | Pro 仓库 | `HikerM/hiker-engineering-runtime-pro`，Private |
@@ -32,6 +32,7 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 - [Community / Pro Boundary](docs/architecture/community-pro-boundary.md)
 - [5.19 Architecture](docs/architecture/5.19-architecture.md)
 - [Project State Plane](docs/architecture/state-plane.md)
+- [Project Bootstrap and Identity](docs/architecture/project-bootstrap-identity.md)
 - [Autonomous Runtime and Writer Safety](docs/architecture/autonomous-runtime.md)
 - [Context, Graph, Services, and Data Performance](docs/architecture/context-graph-data.md)
 - [Commercial Trust Architecture](docs/architecture/commercial-trust.md)
@@ -39,7 +40,7 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 
 ## 当前实现状态
 
-State Plane 已具备真实 SQLite/WAL、短事务 CAS、operation 幂等、依赖边原子提交、语义事件冲突检测、内容寻址 Artifact、Doctor、保守 GC、可验证备份/恢复，以及 Community 5.18 `.ai` 状态的白名单单向导入。所有生产状态变化收敛到 `StateCoordinator`，测试会阻断新的平行写入口。
+State Plane 已具备真实 SQLite/WAL、短事务 CAS、operation 幂等、依赖边原子提交、语义事件冲突检测、内容寻址 Artifact、Doctor、保守 GC、可验证备份/恢复，以及 Community 5.18 `.ai` 状态的白名单单向导入。Project Bootstrap 使用同一只读 Preflight 识别新项目、旧版项目、活动项目、移动、显式 Fork、身份冲突、损坏状态和未完成迁移；Project ID 不再由路径推导，普通读命令不会创建 UUID。所有生产状态变化收敛到 `StateCoordinator`，测试会阻断新的平行写入口。
 
 Runtime 已建立 provider-neutral Adapter contract、Task/Agent/Lease/Ownership/Worktree 同代提交、PID+启动时间+可执行身份验证、最小交接包、崩溃恢复、两阶段资源释放、真实 Git Worktree、风险自适应冲突调度、持久化 Merge Queue 和 Codex CLI Adapter。低/中风险最多三个互不重叠 Writer Lane；高/关键风险收敛到一个 Writer，并要求独立 Assurance Lane。Merge Queue 只授权已冻结、已验证且仍基于目标 HEAD 的候选，不静默执行合并。
 
@@ -65,7 +66,7 @@ Community 5.18 导入的 aggregate Ownership / Task Map 仅作为 `LEGACY_IMPORT
 
 | 验证面 | 结果 | 证据等级 |
 | --- | --- | --- |
-| Unit / Integration | 当前源码 82/82 PASS（含 13 项 `FIELD-5.19-001` 回归）；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
+| Unit / Integration | 当前源码 98/98 PASS（含 `FIELD-5.19-001`、Project Identity/Bootstrap 与无全局 .NET 自包含执行回归）；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
 | Community 5.18 回归 | 五插件合计 297/297 PASS，公开工作区保持干净 | `DETERMINISTIC_VERIFIED` |
 | 加速老化 | 12 个合成月份、1201 Task、120 Goal Revision、120 Handoff、60 Crash | `SIMULATION_PROVEN` |
 | 并发写入 | 1/2/4/8 Worker 均恰好一个 CAS 成功；Runtime Worker 结果需由当前提交重跑确认 | `SIMULATION_PROVEN` |
@@ -80,28 +81,33 @@ Context 在加速老化第 12 月仍为 548 bytes、五次状态读取、零次�
 
 真实客户项目和真实日历 12 个月仍为 `NOT_YET_FIELD_PROVEN`；多 Provider Agent、PostgreSQL Pool Wait / Lock Wait / Saturation Point，以及宿主 Token 节省百分比仍为 `NOT_MEASURED`。
 
-## CLI 使用
+## 安装包使用
 
-前置条件：.NET 9 SDK。运行时项目状态写入目标工程自身的 `.ai`；以下命令不会安装或替换 Codex 插件。
-
-```powershell
-dotnet run --project src/Hiker.Pro.Cli -- version
-dotnet run --project src/Hiker.Pro.Cli -- init --root <project>
-dotnet run --project src/Hiker.Pro.Cli -- doctor --root <project>
-dotnet run --project src/Hiker.Pro.Cli -- status --root <project>
-dotnet run --project src/Hiker.Pro.Cli -- resume --root <project> --project-id <stable-id> --goal-id <goal-id>
-dotnet run --project src/Hiker.Pro.Cli -- backup --root <project>
-dotnet run --project src/Hiker.Pro.Cli -- export --root <project> --project-id <stable-id>
-dotnet run --project src/Hiker.Pro.Cli -- migrate-community --root <project> --project-id <stable-id>
-```
-
-`restore` 必须显式提供备份文件及其 SHA-256，避免误恢复：
+`hiker-pro-<version>-win-x64.zip` 是目录式自包含发行包。目标 Windows x64 电脑不需要安装 .NET SDK 或 .NET Runtime，也不依赖全局 `DOTNET_ROOT`。必须完整解压 `payload` 中的 `hiker.exe`、`hostfxr.dll`、`hostpolicy.dll`、`coreclr.dll`、托管程序集和 JSON；不得只复制 `hiker.exe`。
 
 ```powershell
-dotnet run --project src/Hiker.Pro.Cli -- restore --root <project> --backup <file> --confirm-sha256 <sha256>
+hiker version
+hiker init --root <project>
+hiker doctor --root <project>
+hiker status --root <project>
+hiker resume --root <project> --goal-id <goal-id>
+hiker backup --root <project>
+hiker export --root <project>
+hiker migrate-community --root <project>
 ```
 
-## 构建
+`init/status/doctor/resume/backup/export/migrate-community` 经过同一个 Project Preflight。`--project-id` 只用于恢复、CI 和显式 Fork 等高级场景；已有项目会从唯一权威状态自动解析原 ID，身份冲突或损坏状态会阻断而不会生成第二个 UUID。显式 Fork 必须提供新的稳定 ID，并在原子事务中继承可复用事实、清除运行中 Task/Lease/Ownership/Worktree 绑定：
+
+```powershell
+hiker fork --root <copied-project> --project-id <new-stable-id>
+hiker restore --root <project> --backup <file> --confirm-sha256 <sha256>
+```
+
+运行时项目状态只写入目标工程自身的 `.ai`；这些命令不会安装或替换 Codex 插件。Legacy 导入保留原始 `.ai` 文件，不默认删除、清空或重建。
+
+## 源码开发
+
+只有从源码编译和运行测试需要 .NET 9 SDK：
 
 ```powershell
 dotnet restore
@@ -156,6 +162,6 @@ dotnet run --project tools/Hiker.Pro.Release -c Release -- gate `
   --report artifacts/verification/commercial-release-gate.json
 ```
 
-`verify` 的 Clean Install 在隔离临时目录中执行，不安装或替换当前 Codex 插件。Gate 的唯一通过结果是 `PASS_5_19_COMMERCIAL`；任一事实缺失或不匹配均返回 `BLOCKED_5_19`。
+`verify` 的 Clean Install 在隔离临时目录中执行，不安装或替换当前 Codex 插件。验证会清空子进程 `PATH`、将 `DOTNET_ROOT` 指向不存在目录并禁用 multilevel lookup，证明 `hiker.exe` 使用包内 Runtime；缺少任一必需 Runtime 文件都会由 `SELF_CONTAINED_RUNTIME` 阻断。Gate 的唯一通过结果是 `PASS_5_19_COMMERCIAL`；任一事实缺失或不匹配均返回 `BLOCKED_5_19`。
 
 完整签名构建、独立信任根和聚合 Gate 说明见 [5.19 Release Process](docs/release/5.19-release-process.md)。私钥、签名密钥和真实商业 License 禁止进入 Git、Fixture、日志或发行包。

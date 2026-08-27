@@ -86,6 +86,7 @@ internal sealed class ReleasePackageVerifier
                     ["state_schema_version"] = packageVersions.StateSchema,
                     ["source_commit"] = gitCommit
                 }));
+            checks.Add(VerifySelfContainedRuntime(extraction));
             checks.Add(ScanPayload(extraction));
             checks.Add(await RunCleanInstallAsync(extraction, packageVersions, cancellationToken).ConfigureAwait(false));
             checks.Add(await VerifyTamperRejectionAsync(envelope, extraction, verifier, cancellationToken).ConfigureAwait(false));
@@ -185,26 +186,79 @@ internal sealed class ReleasePackageVerifier
             new Dictionary<string, object?> { ["findings"] = findings });
     }
 
+    private static ReleaseGateCheck VerifySelfContainedRuntime(string extraction)
+    {
+        var payload = Path.Combine(extraction, "payload");
+        var required = new[]
+        {
+            "hiker.exe",
+            "hiker.deps.json",
+            "hiker.runtimeconfig.json",
+            "hostfxr.dll",
+            "hostpolicy.dll",
+            "coreclr.dll",
+            "clrjit.dll",
+            "System.Private.CoreLib.dll"
+        };
+        var missing = required.Where(file => !File.Exists(Path.Combine(payload, file))).ToArray();
+        var runtimeConfigPath = Path.Combine(payload, "hiker.runtimeconfig.json");
+        var frameworkDependent = true;
+        if (File.Exists(runtimeConfigPath))
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(runtimeConfigPath));
+            var runtimeOptions = document.RootElement.GetProperty("runtimeOptions");
+            frameworkDependent = runtimeOptions.TryGetProperty("framework", out _) || runtimeOptions.TryGetProperty("frameworks", out _);
+        }
+
+        var runtimeFiles = Directory.Exists(payload)
+            ? Directory.EnumerateFiles(payload, "*", SearchOption.TopDirectoryOnly).Count()
+            : 0;
+        var pass = missing.Length == 0 && !frameworkDependent && runtimeFiles >= 50;
+        return new ReleaseGateCheck(
+            "SELF_CONTAINED_RUNTIME",
+            pass ? "PASS" : "BLOCKED",
+            "The Windows x64 payload carries the .NET runtime and does not declare a machine-wide framework dependency",
+            new Dictionary<string, object?>
+            {
+                ["missing_runtime_files"] = missing,
+                ["framework_dependent"] = frameworkDependent,
+                ["payload_file_count"] = runtimeFiles
+            });
+    }
+
     private static async Task<ReleaseGateCheck> RunCleanInstallAsync(
         string extraction,
         PackageVersions versions,
         CancellationToken cancellationToken)
     {
         var payload = Path.Combine(extraction, "payload");
-        var executable = OperatingSystem.IsWindows() && File.Exists(Path.Combine(payload, "hiker.exe"))
-            ? Path.Combine(payload, "hiker.exe")
-            : "dotnet";
-        var prefix = executable == "dotnet" ? new[] { Path.Combine(payload, "hiker.dll") } : Array.Empty<string>();
+        var executable = Path.Combine(payload, "hiker.exe");
+        if (!OperatingSystem.IsWindows() || !File.Exists(executable))
+        {
+            return new ReleaseGateCheck(
+                "CLEAN_INSTALL",
+                "BLOCKED",
+                "Windows clean-install verification requires the packaged hiker.exe apphost",
+                new Dictionary<string, object?> { ["executable_present"] = File.Exists(executable) });
+        }
+
         var project = Path.Combine(Path.GetTempPath(), $"hiker-pro-clean-project-{Guid.NewGuid():N}");
+        var isolatedEnvironment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["PATH"] = string.Empty,
+            ["DOTNET_ROOT"] = Path.Combine(project, "missing-dotnet"),
+            ["DOTNET_ROOT_X64"] = null,
+            ["DOTNET_MULTILEVEL_LOOKUP"] = "0"
+        };
         Directory.CreateDirectory(project);
         try
         {
-            var version = await RequireCliAsync(executable, payload, prefix.Concat(new[] { "version" }), cancellationToken).ConfigureAwait(false);
-            var init = await RequireCliAsync(executable, payload, prefix.Concat(new[] { "init", "--root", project }), cancellationToken).ConfigureAwait(false);
-            var doctor = await RequireCliAsync(executable, payload, prefix.Concat(new[] { "doctor", "--root", project }), cancellationToken).ConfigureAwait(false);
-            var status = await RequireCliAsync(executable, payload, prefix.Concat(new[] { "status", "--root", project }), cancellationToken).ConfigureAwait(false);
-            var backup = await RequireCliAsync(executable, payload, prefix.Concat(new[] { "backup", "--root", project }), cancellationToken).ConfigureAwait(false);
-            var export = await RequireCliAsync(executable, payload, prefix.Concat(new[] { "export", "--root", project, "--project-id", "clean-install" }), cancellationToken).ConfigureAwait(false);
+            var version = await RequireCliAsync(executable, payload, new[] { "version" }, isolatedEnvironment, cancellationToken).ConfigureAwait(false);
+            var init = await RequireCliAsync(executable, payload, new[] { "init", "--root", project }, isolatedEnvironment, cancellationToken).ConfigureAwait(false);
+            var doctor = await RequireCliAsync(executable, payload, new[] { "doctor", "--root", project }, isolatedEnvironment, cancellationToken).ConfigureAwait(false);
+            var status = await RequireCliAsync(executable, payload, new[] { "status", "--root", project }, isolatedEnvironment, cancellationToken).ConfigureAwait(false);
+            var backup = await RequireCliAsync(executable, payload, new[] { "backup", "--root", project }, isolatedEnvironment, cancellationToken).ConfigureAwait(false);
+            var export = await RequireCliAsync(executable, payload, new[] { "export", "--root", project }, isolatedEnvironment, cancellationToken).ConfigureAwait(false);
             var exportCount = Directory.Exists(Path.Combine(project, ".ai", "exports"))
                 ? Directory.EnumerateFiles(Path.Combine(project, ".ai", "exports"), "*.json").Count()
                 : 0;
@@ -219,7 +273,7 @@ internal sealed class ReleasePackageVerifier
             return new ReleaseGateCheck(
                 "CLEAN_INSTALL",
                 pass ? "PASS" : "BLOCKED",
-                "An isolated extracted package executed version, init, doctor, status, backup and state export",
+                "An isolated extracted package executed version, init, doctor, status, backup and state export with global .NET discovery disabled",
                 new Dictionary<string, object?>
                 {
                     ["commands"] = 6,
@@ -265,8 +319,9 @@ internal sealed class ReleasePackageVerifier
         string executable,
         string workingDirectory,
         IEnumerable<string> arguments,
+        IReadOnlyDictionary<string, string?> environment,
         CancellationToken cancellationToken) =>
-        ProcessRunner.RequireAsync(executable, workingDirectory, arguments, TimeSpan.FromMinutes(1), cancellationToken);
+        ProcessRunner.RequireAsync(executable, workingDirectory, arguments, TimeSpan.FromMinutes(1), cancellationToken, environment);
 
     private static async Task<string> FileSha256Async(string path, CancellationToken cancellationToken)
     {

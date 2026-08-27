@@ -13,9 +13,9 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task Start_ReservesThenActivatesOneWriterAcrossTaskLeaseAndOwnership()
     {
-        await using var project = await TestProject.CreateAsync();
+        await using var project = await TestProject.CreateAsync("project-1");
         var adapter = new TestRuntimeAdapter("test-runtime");
-        var coordinator = new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe());
+        var coordinator = new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe(), project.Bootstrap);
         var result = await coordinator.StartAsync("start-1", Start(project.Root, "runtime-1"), adapter);
         Assert.Equal("RUNNING", result.Status);
         Assert.Equal(RuntimeLifecycle.Running, result.Handle.Lifecycle);
@@ -32,8 +32,8 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task Start_RejectsSecondWriterWhileLeaseIsActiveWithoutStartingAdapter()
     {
-        await using var project = await TestProject.CreateAsync();
-        var coordinator = new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe());
+        await using var project = await TestProject.CreateAsync("project-1");
+        var coordinator = new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe(), project.Bootstrap);
         Assert.Equal("RUNNING", (await coordinator.StartAsync("start-owner", Start(project.Root, "runtime-owner"), new TestRuntimeAdapter("adapter-owner"))).Status);
         var contender = new TestRuntimeAdapter("adapter-contender");
         await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.StartAsync("start-contender", Start(project.Root, "runtime-contender"), contender));
@@ -43,8 +43,8 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task Heartbeat_IsOwnedAndIdempotent()
     {
-        await using var project = await TestProject.CreateAsync();
-        var coordinator = new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe());
+        await using var project = await TestProject.CreateAsync("project-1");
+        var coordinator = new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe(), project.Bootstrap);
         var started = await coordinator.StartAsync("start-heartbeat", Start(project.Root, "runtime-1"), new TestRuntimeAdapter("adapter"));
         var heartbeatAt = DateTimeOffset.UtcNow;
         var first = await coordinator.HeartbeatAsync("heartbeat-1", "project-1", "task-1", "runtime-1", "source-1", started.Generation, heartbeatAt);
@@ -57,10 +57,10 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task Handoff_PausesCheckpointsAndTransfersAllWriterFactsAtomically()
     {
-        await using var project = await TestProject.CreateAsync();
+        await using var project = await TestProject.CreateAsync("project-1");
         var inspector = new TestWorkspaceInspector(project.Root);
         var sourceAdapter = new TestRuntimeAdapter("source-adapter");
-        var source = await new RuntimeCoordinator(project.Coordinator, inspector, new ProcessIdentityProbe())
+        var source = await new RuntimeCoordinator(project.Coordinator, inspector, new ProcessIdentityProbe(), project.Bootstrap)
             .StartAsync("handoff-source", Start(project.Root, "runtime-source"), sourceAdapter);
         var targetAdapter = new TestRuntimeAdapter("target-adapter");
         var artifacts = new ContentAddressedArtifactStore(project.Layout, project.Coordinator);
@@ -109,10 +109,10 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task Recovery_UsesValidatedCheckpointAndDoesNotReplayCompletedRecovery()
     {
-        await using var project = await TestProject.CreateAsync();
+        await using var project = await TestProject.CreateAsync("project-1");
         var inspector = new TestWorkspaceInspector(project.Root);
         var failedAdapter = new TestRuntimeAdapter("failed-adapter");
-        var started = await new RuntimeCoordinator(project.Coordinator, inspector, new ProcessIdentityProbe())
+        var started = await new RuntimeCoordinator(project.Coordinator, inspector, new ProcessIdentityProbe(), project.Bootstrap)
             .StartAsync("recover-source", Start(project.Root, "runtime-failed"), failedAdapter);
         var checkpoint = await failedAdapter.CheckpointAsync(started.Handle, "task-1");
         var checkpointPayload = $$"""
@@ -165,10 +165,10 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task Recovery_BlocksOnWorkspaceDriftBeforeStartingSubstitute()
     {
-        await using var project = await TestProject.CreateAsync();
+        await using var project = await TestProject.CreateAsync("project-1");
         var normalInspector = new TestWorkspaceInspector(project.Root);
         var failedAdapter = new TestRuntimeAdapter("failed-adapter");
-        var started = await new RuntimeCoordinator(project.Coordinator, normalInspector, new ProcessIdentityProbe())
+        var started = await new RuntimeCoordinator(project.Coordinator, normalInspector, new ProcessIdentityProbe(), project.Bootstrap)
             .StartAsync("drift-source", Start(project.Root, "runtime-failed"), failedAdapter);
         var checkpoint = await failedAdapter.CheckpointAsync(started.Handle, "task-1");
         var payload = $$"""{"checkpoint_id":"{{checkpoint.CheckpointId}}","runtime_id":"{{checkpoint.RuntimeId}}","task_id":"{{checkpoint.TaskId}}","state_artifact_ref":"{{checkpoint.StateArtifactRef}}","source_fingerprint":"{{checkpoint.SourceFingerprint}}","created_at":"{{checkpoint.CreatedAt:O}}"}""";
@@ -190,18 +190,18 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task WorktreeGate_AllowsDisjointScopesButRejectsOverlappingWriterScope()
     {
-        await using var project = await TestProject.CreateAsync();
+        await using var project = await TestProject.CreateAsync("project-1");
         var firstRoot = Path.Combine(project.Root, "worktree-a");
         var secondRoot = Path.Combine(project.Root, "worktree-b");
         var thirdRoot = Path.Combine(project.Root, "worktree-c");
-        _ = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(firstRoot), new ProcessIdentityProbe())
+        _ = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(firstRoot), new ProcessIdentityProbe(), project.Bootstrap)
             .StartAsync("scope-a", Start(firstRoot, "runtime-a", "task-a", "worktree-a", "modules/a"), new TestRuntimeAdapter("adapter-a"));
-        var disjoint = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(secondRoot), new ProcessIdentityProbe())
+        var disjoint = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(secondRoot), new ProcessIdentityProbe(), project.Bootstrap)
             .StartAsync("scope-b", Start(secondRoot, "runtime-b", "task-b", "worktree-b", "modules/b"), new TestRuntimeAdapter("adapter-b"));
         Assert.Equal("RUNNING", disjoint.Status);
         var conflicting = new TestRuntimeAdapter("adapter-c");
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(thirdRoot), new ProcessIdentityProbe())
+            new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(thirdRoot), new ProcessIdentityProbe(), project.Bootstrap)
                 .StartAsync("scope-c", Start(thirdRoot, "runtime-c", "task-c", "worktree-c", "modules/a/api"), conflicting));
         Assert.Equal(0, conflicting.StartCalls);
     }
@@ -209,9 +209,9 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task Completion_DrainsThenReleasesLeaseOwnershipAndWorktreeExactlyOnce()
     {
-        await using var project = await TestProject.CreateAsync();
+        await using var project = await TestProject.CreateAsync("project-1");
         var adapter = new TestRuntimeAdapter("completion-adapter");
-        var started = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe())
+        var started = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe(), project.Bootstrap)
             .StartAsync("completion-source", Start(project.Root, "runtime-complete"), adapter);
         var coordinator = new RuntimeLifecycleCoordinator(project.Coordinator);
         var request = new RuntimeCompletionRequest(
@@ -234,10 +234,10 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task AdvancedDoctor_FailsClosedForExpiredDeadLeaseWithoutStealingIt()
     {
-        await using var project = await TestProject.CreateAsync();
+        await using var project = await TestProject.CreateAsync("project-1");
         var startTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var startClock = new TestTimeProvider(startTime);
-        _ = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe(), startClock)
+        _ = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe(), project.Bootstrap, startClock)
             .StartAsync("doctor-source", Start(project.Root, "runtime-dead"), new TestRuntimeAdapter("doctor-adapter"));
         var doctor = new AdvancedDoctor(project.Store, new ProcessIdentityProbe(), new TestTimeProvider(startTime.AddMinutes(10)));
         var health = await doctor.CheckProjectAsync("project-1");
@@ -250,18 +250,18 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task ExpiredLease_WithSameLiveProcessIdentityCannotBeStolen()
     {
-        await using var project = await TestProject.CreateAsync();
+        await using var project = await TestProject.CreateAsync("project-1");
         var probe = new ProcessIdentityProbe();
         var identity = await probe.CurrentAsync();
         Assert.True(await probe.IsSameLiveProcessAsync(identity));
         Assert.False(await probe.IsSameLiveProcessAsync(identity with { StartTime = identity.StartTime.AddSeconds(-1) }));
         var startTime = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var ownerAdapter = new TestRuntimeAdapter("live-owner") { ProcessIdentity = identity };
-        _ = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), probe, new TestTimeProvider(startTime))
+        _ = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), probe, project.Bootstrap, new TestTimeProvider(startTime))
             .StartAsync("live-owner-start", Start(project.Root, "runtime-live"), ownerAdapter);
         var contender = new TestRuntimeAdapter("contender");
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), probe, new TestTimeProvider(startTime.AddHours(1)))
+            new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), probe, project.Bootstrap, new TestTimeProvider(startTime.AddHours(1)))
                 .StartAsync("live-owner-contender", Start(project.Root, "runtime-other"), contender));
         Assert.Equal(0, contender.StartCalls);
         var health = await new AdvancedDoctor(project.Store, probe, new TestTimeProvider(startTime.AddHours(1))).CheckProjectAsync("project-1");
@@ -271,7 +271,7 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task CodexCliAdapter_UsesRealInstalledCliAndStartsSuspendedWithoutModelCall()
     {
-        await using var project = await TestProject.CreateAsync();
+        await using var project = await TestProject.CreateAsync("project-1");
         var inputDirectory = Path.Combine(project.Layout.AiRoot, "runtime-input");
         Directory.CreateDirectory(inputDirectory);
         await File.WriteAllTextAsync(Path.Combine(inputDirectory, "instruction.txt"), "Return a bounded integration marker.");
@@ -291,9 +291,9 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task FaultAfterLeaseReservation_LeavesSingleRecoverableWriterFact()
     {
-        await using var project = await TestProject.CreateAsync();
+        await using var project = await TestProject.CreateAsync("project-1");
         var adapter = new TestRuntimeAdapter("fault-after-reserve") { FailResume = true };
-        var coordinator = new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe());
+        var coordinator = new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe(), project.Bootstrap);
         await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.StartAsync("fault-reserve", Start(project.Root, "runtime-fault"), adapter));
         var leaseState = await project.Store.ReadAsync(new StateKey("project-1", EntityKinds.RuntimeLease, "task-1"));
         var ownershipState = await project.Store.ReadAsync(new StateKey("project-1", EntityKinds.Ownership, "task-1"));
@@ -309,10 +309,10 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task FaultDuringHandoffRecovery_DoesNotCreateSecondWriterOrReplayTransfer()
     {
-        await using var project = await TestProject.CreateAsync();
+        await using var project = await TestProject.CreateAsync("project-1");
         var inspector = new TestWorkspaceInspector(project.Root);
         var sourceAdapter = new TestRuntimeAdapter("source");
-        var started = await new RuntimeCoordinator(project.Coordinator, inspector, new ProcessIdentityProbe())
+        var started = await new RuntimeCoordinator(project.Coordinator, inspector, new ProcessIdentityProbe(), project.Bootstrap)
             .StartAsync("fault-handoff-source", Start(project.Root, "runtime-source"), sourceAdapter);
         var targetAdapter = new TestRuntimeAdapter("target") { FailRecover = true };
         var coordinator = new HandoffCoordinator(project.Coordinator, new ContentAddressedArtifactStore(project.Layout, project.Coordinator), inspector);
@@ -335,9 +335,9 @@ public sealed class RuntimeCoordinatorTests
     [Fact]
     public async Task FaultDuringFinalRelease_StaysDrainingAndCannotDuplicateCompletion()
     {
-        await using var project = await TestProject.CreateAsync();
+        await using var project = await TestProject.CreateAsync("project-1");
         var adapter = new TestRuntimeAdapter("release-fault") { FailShutdown = true };
-        var started = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe())
+        var started = await new RuntimeCoordinator(project.Coordinator, new TestWorkspaceInspector(project.Root), new ProcessIdentityProbe(), project.Bootstrap)
             .StartAsync("fault-release-source", Start(project.Root, "runtime-release"), adapter);
         var coordinator = new RuntimeLifecycleCoordinator(project.Coordinator);
         var request = new RuntimeCompletionRequest(
