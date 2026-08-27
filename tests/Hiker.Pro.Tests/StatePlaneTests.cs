@@ -147,11 +147,14 @@ public sealed class StatePlaneTests
         await using var project = await TestProject.CreateAsync();
         var governance = Path.Combine(project.Layout.AiRoot, "governance");
         var tasks = Path.Combine(project.Layout.AiRoot, "tasks");
+        var rawEvidence = Path.Combine(project.Layout.AiRoot, "evidence", "raw");
         Directory.CreateDirectory(governance);
         Directory.CreateDirectory(tasks);
+        Directory.CreateDirectory(rawEvidence);
         await File.WriteAllTextAsync(Path.Combine(governance, "goal-contract.json"), "{\"goal_id\":\"goal-1\",\"revision\":3}");
         await File.WriteAllTextAsync(Path.Combine(tasks, "TASK-001.json"), "{\"task_id\":\"TASK-001\",\"goal_revision\":3,\"status\":\"Development\"}");
-        await File.WriteAllTextAsync(Path.Combine(project.Layout.AiRoot, "not-imported.json"), "{\"prompt\":\"must stay outside state\"}");
+        var preservedEvidence = Path.Combine(rawEvidence, "not-imported.json");
+        await File.WriteAllTextAsync(preservedEvidence, "{\"prompt\":\"must stay outside state\"}");
 
         var importer = new Community518Importer(project.Layout, project.Coordinator);
         var first = await importer.ImportAsync("project-legacy");
@@ -161,6 +164,8 @@ public sealed class StatePlaneTests
         Assert.Equal("ALREADY_IMPORTED", retry.Status);
         Assert.NotNull(await project.Store.ReadAsync(new StateKey("project-legacy", EntityKinds.Task, "TASK-001")));
         Assert.NotNull(await project.Store.ReadAsync(new StateKey("project-legacy", EntityKinds.Migration, "community-5.18")));
+        Assert.Null(await project.Store.ReadAsync(new StateKey("project-legacy", EntityKinds.Evidence, "evidence:raw:not-imported.json")));
+        Assert.True(File.Exists(preservedEvidence));
         Assert.Equal(3, (await project.Store.GetMetricsAsync()).Entities);
     }
 

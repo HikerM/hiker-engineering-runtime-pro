@@ -47,6 +47,29 @@ public sealed record ProjectIdentityInventory(
     bool HasAnyEntity,
     bool HasAnyOperation);
 
+public static class LegacyInventoryClassifications
+{
+    public const string KnownLegacyContent = "KNOWN_LEGACY_CONTENT";
+    public const string SafePreservedContent = "SAFE_PRESERVED_CONTENT";
+    public const string MigratableLegacyContent = "MIGRATABLE_LEGACY_CONTENT";
+    public const string UnknownRequiresReview = "UNKNOWN_REQUIRES_REVIEW";
+}
+
+public sealed record LegacyInventoryEntry(
+    string Path,
+    string SemanticType,
+    IReadOnlyList<string> Classifications,
+    string Handling,
+    int MigratableFacts);
+
+public sealed record LegacyInventorySummary(
+    int KnownLegacyContent,
+    int SafePreservedContent,
+    int MigratableLegacyContent,
+    int UnknownRequiresReview,
+    string InventoryFingerprint,
+    IReadOnlyList<LegacyInventoryEntry> Entries);
+
 public sealed record AiContentInventory(
     bool AiExists,
     int AuthoritativeFacts,
@@ -54,6 +77,7 @@ public sealed record AiContentInventory(
     int ColdArchiveItems,
     int RebuildableCacheItems,
     int TemporaryItems,
+    LegacyInventorySummary LegacyInventory,
     IReadOnlyList<string> UnknownItems);
 
 public sealed record ProjectPreflightResult(

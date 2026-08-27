@@ -9,6 +9,7 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
     public async Task<CommunityImportReport> ImportAsync(string projectId, CancellationToken cancellationToken = default)
     {
         var normalizedProject = new StateKey(projectId, EntityKinds.Project, "project").Normalize().ProjectId;
+        var inventory = LegacyAiInventoryInspector.Inspect(layout);
         var markerKey = new StateKey(normalizedProject, EntityKinds.Migration, "community-5.18");
         var marker = await state.ReadAsync(markerKey, cancellationToken).ConfigureAwait(false);
         if (marker is not null)
@@ -21,7 +22,21 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
                 0,
                 markerDocument.RootElement.GetProperty("imported").GetInt32(),
                 marker.SourceFingerprint,
-                Array.Empty<string>());
+                Array.Empty<string>(),
+                inventory.Summary);
+        }
+
+        if (inventory.UnknownItems.Count > 0)
+        {
+            return new CommunityImportReport(
+                "REQUIRES_REVIEW",
+                normalizedProject,
+                0,
+                0,
+                0,
+                inventory.Summary.InventoryFingerprint,
+                inventory.UnknownItems,
+                inventory.Summary);
         }
 
         var sources = Community518SourceCatalog.Discover(layout);
@@ -38,6 +53,11 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
             {
                 payload = await File.ReadAllTextAsync(source.Path, cancellationToken).ConfigureAwait(false);
                 using var document = JsonDocument.Parse(payload, new JsonDocumentOptions { MaxDepth = 128 });
+                if (!Community518SourceCatalog.TryValidate(document.RootElement, source.ValidationProfile, out var validationReason))
+                {
+                    rejected.Add($"{relative}:INVALID_LEGACY_FORMAT:{validationReason}");
+                    continue;
+                }
                 payload = JsonSerializer.Serialize(document.RootElement);
             }
             catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
@@ -56,16 +76,16 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
                     key,
                     0,
                     GoalRevision(payload),
-                    LegacyLifecycle(source.Kind),
+                    source.Lifecycle,
                     "COMMUNITY_5_18_IMPORT",
                     "2.0.0",
                     sourceHash,
                     Sha256(relative),
                     payload,
-                    source.Kind is EntityKinds.Checkpoint or EntityKinds.Evidence ? RetentionTier.Warm : RetentionTier.Hot),
+                    source.Retention),
                 "COMMUNITY_STATE_IMPORTED",
                 "COMMUNITY_5_18_IMPORT",
-                JsonSerializer.Serialize(new { source_ref = $".ai/{relative}" }));
+                JsonSerializer.Serialize(new { source_ref = $".ai/{relative}", semantic_type = source.SemanticType }));
             var snapshot = await state.ReadForReasoningAsync(key, cancellationToken).ConfigureAwait(false);
             var result = await state.CommitAsync(
                 snapshot,
@@ -93,7 +113,7 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
         var aggregate = Convert.ToHexString(aggregateHash.GetHashAndReset()).ToLowerInvariant();
         if (rejected.Count > 0)
         {
-            return new CommunityImportReport("REQUIRES_REVIEW", normalizedProject, sources.Count, imported, replayed, aggregate, ContractCollections.Freeze(rejected));
+            return new CommunityImportReport("REQUIRES_REVIEW", normalizedProject, sources.Count, imported, replayed, aggregate, ContractCollections.Freeze(rejected), inventory.Summary);
         }
 
         var markerPayload = JsonSerializer.Serialize(new
@@ -104,7 +124,15 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
             source_fingerprint = aggregate,
             completed_at = DateTimeOffset.UtcNow,
             authority = "SQLITE_STATE_PLANE",
-            legacy_files = "READ_ONLY_SOURCE"
+            legacy_files = "READ_ONLY_SOURCE",
+            inventory = new
+            {
+                known_legacy_content = inventory.Summary.KnownLegacyContent,
+                safe_preserved_content = inventory.Summary.SafePreservedContent,
+                migratable_legacy_content = inventory.Summary.MigratableLegacyContent,
+                unknown_requires_review = inventory.Summary.UnknownRequiresReview,
+                fingerprint = inventory.Summary.InventoryFingerprint
+            }
         });
         var markerSnapshot = await state.ReadForReasoningAsync(markerKey, cancellationToken).ConfigureAwait(false);
         var markerResult = await state.CommitAsync(
@@ -117,10 +145,10 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
             cancellationToken: cancellationToken).ConfigureAwait(false);
         if (!markerResult.Committed)
         {
-            return new CommunityImportReport("REQUIRES_REVIEW", normalizedProject, sources.Count, imported, replayed, aggregate, new[] { $"marker:{markerResult.Status}" });
+            return new CommunityImportReport("REQUIRES_REVIEW", normalizedProject, sources.Count, imported, replayed, aggregate, new[] { $"marker:{markerResult.Status}" }, inventory.Summary);
         }
 
-        return new CommunityImportReport("IMPORTED", normalizedProject, sources.Count, imported, replayed, aggregate, Array.Empty<string>());
+        return new CommunityImportReport("IMPORTED", normalizedProject, sources.Count, imported, replayed, aggregate, Array.Empty<string>(), inventory.Summary);
     }
 
     private static string EntityId(string relative, string payload)
@@ -157,11 +185,6 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
 
         return 0;
     }
-
-    private static StateLifecycle LegacyLifecycle(string kind) =>
-        kind is EntityKinds.Ownership or EntityKinds.Worktree
-            ? StateLifecycle.Incompatible
-            : StateLifecycle.Valid;
 
     private static string Sha256(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 }

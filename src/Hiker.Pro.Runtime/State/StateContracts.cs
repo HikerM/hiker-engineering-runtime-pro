@@ -234,7 +234,8 @@ public sealed record CommunityImportReport(
     int Imported,
     int Replayed,
     string SourceFingerprint,
-    IReadOnlyList<string> Rejected);
+    IReadOnlyList<string> Rejected,
+    LegacyInventorySummary? Inventory = null);
 
 public sealed record ArtifactRecord(
     string ArtifactId,

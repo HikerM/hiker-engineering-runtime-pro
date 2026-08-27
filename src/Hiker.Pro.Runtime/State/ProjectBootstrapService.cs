@@ -43,8 +43,11 @@ public sealed class ProjectBootstrapService(
         var supplied = suppliedProjectId is null
             ? null
             : new StateKey(suppliedProjectId, EntityKinds.Project, IdentityEntityId).Normalize().ProjectId;
-        var content = InspectAiContent();
         var identity = await store.InspectProjectIdentityAsync(cancellationToken).ConfigureAwait(false);
+        var inspectLegacyContents = identity.DatabaseHealthy &&
+                                    (intent is ProjectBootstrapIntent.Initialize or ProjectBootstrapIntent.MigrateCommunity or ProjectBootstrapIntent.Recovery ||
+                                     identity.ActiveIdentityRecords.Count == 0 && identity.CompletedCommunityImportProjectIds.Count == 0);
+        var content = InspectAiContent(inspectLegacyContents);
         if (!identity.DatabaseHealthy)
         {
             return Result(
@@ -382,11 +385,12 @@ public sealed class ProjectBootstrapService(
             identity);
     }
 
-    private AiContentInventory InspectAiContent()
+    private AiContentInventory InspectAiContent(bool inspectLegacyContents)
     {
+        var legacyInventory = LegacyAiInventoryInspector.Inspect(layout, inspectLegacyContents);
         if (!Directory.Exists(layout.AiRoot))
         {
-            return new AiContentInventory(false, 0, 0, 0, 0, 0, Array.Empty<string>());
+            return new AiContentInventory(false, 0, 0, 0, 0, 0, legacyInventory.Summary, Array.Empty<string>());
         }
 
         var legacy = Community518SourceCatalog.HasAny(layout) ? 1 : 0;
@@ -394,7 +398,7 @@ public sealed class ProjectBootstrapService(
         var archive = 0;
         var cache = 0;
         var temporary = 0;
-        var unknown = new List<string>();
+        var unknown = new List<string>(legacyInventory.UnknownItems);
         foreach (var item in Directory.EnumerateFileSystemEntries(layout.AiRoot, "*", SearchOption.TopDirectoryOnly))
         {
             var name = Path.GetFileName(item);
@@ -406,10 +410,26 @@ public sealed class ProjectBootstrapService(
             {
                 // Counted by the allowlisted legacy catalog; unknown nested data is never auto-imported.
             }
-            else if (unknown.Count < 32) unknown.Add(name);
+            else if (LegacyAiInventoryInspector.SemanticTopLevelNames.Contains(name))
+            {
+                // Classified by bounded semantic inventory; only validated facts enter the importer.
+            }
+            else
+            {
+                // Unknown top-level entries are reported by the single inventory classifier.
+            }
         }
 
-        return new AiContentInventory(true, authoritative, legacy, archive, cache, temporary, ContractCollections.Freeze(unknown));
+        var inventorySummary = legacyInventory.Summary with { UnknownRequiresReview = unknown.Count };
+        return new AiContentInventory(
+            true,
+            authoritative,
+            legacy,
+            archive,
+            cache,
+            temporary,
+            inventorySummary,
+            ContractCollections.Freeze(unknown));
     }
 
     private static bool TryReadIdentity(StateSnapshot state, out IdentityPayloadValue payload)

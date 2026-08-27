@@ -1,6 +1,22 @@
 # Changelog
 
-## 5.19.0-rc.4 — Unreleased
+## 5.19.0-rc.5 — Unreleased
+
+### Added
+
+- `GA-5.19-LEGACY-INVENTORY-001`：新增 Legacy `.ai` 语义 Inventory，对 `architecture`、`requirements`、`evidence`、`knowledge` 与 `logs` 区分已知内容、安全保留内容、可迁移事实和未知待审内容。
+- 仅将符合 Community 5.18 真实结构的 Architecture、Requirement、Evidence 与 Knowledge metadata 导入 State Plane；Opaque Evidence、Knowledge DB 与 Historical Logs 保留原文件但不进入 Active State。
+
+### Safety
+
+- 不再因存在可安全保留的旧目录而阻断合法 Community 迁移；未知结构、格式不匹配、重解析点与超出盘点预算的内容仍为 `UNKNOWN_REQUIRES_REVIEW`。
+- 迁移前深度验证 Legacy Inventory；完成接管后的日常 `status/doctor` 只读顶层与热 State，不随冷 Evidence/Logs 历史线性扫描。
+
+### Verification
+
+- 私有源码完整 Unit / Integration：104/104 PASS；包含脱敏旧布局 CLI 迁移、自动 Project ID、原文件哈希保持、非活动事实归档、任意 JSON 不导入、未知/畸形内容零状态写入、Finalize、Status、Doctor 与双重幂等回归。
+
+## 5.19.0-rc.4 — 2026-08-27
 
 ### Added
 
