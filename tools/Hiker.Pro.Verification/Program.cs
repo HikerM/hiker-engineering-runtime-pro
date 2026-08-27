@@ -32,12 +32,16 @@ try
         case "environment-control":
             checks.AddRange(await new EnvironmentControlPlaneScenario().RunAsync());
             break;
+        case "change-intelligence":
+            checks.AddRange(await new ChangeIntelligenceScenario(options).RunAsync());
+            break;
         case "all":
             checks.AddRange(await new StateAgingScenario().RunAsync());
             checks.AddRange(await new LargeRepositoryScenario(options).RunAsync());
             checks.AddRange(await new RealServicesScenario(options).RunAsync());
             checks.AddRange(await new CommercialBoundaryScenario(options).RunAsync());
             checks.AddRange(await new EnvironmentControlPlaneScenario().RunAsync());
+            checks.AddRange(await new ChangeIntelligenceScenario(options).RunAsync());
             break;
         default:
             throw new ArgumentException($"Unknown scenario: {options.Scenario}");

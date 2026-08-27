@@ -65,6 +65,11 @@ public static class EntityKinds
     public const string Contract = "CONTRACT";
     public const string ResourceLease = "RESOURCE_LEASE";
     public const string Migration = "MIGRATION";
+    public const string ChangeContract = "CHANGE_CONTRACT";
+    public const string ChangeImpact = "CHANGE_IMPACT";
+    public const string ChangeLoop = "CHANGE_LOOP";
+    public const string PatchDebt = "PATCH_DEBT";
+    public const string ChangeOutcome = "CHANGE_OUTCOME";
 }
 
 public sealed record StateKey(string ProjectId, string Kind, string EntityId)

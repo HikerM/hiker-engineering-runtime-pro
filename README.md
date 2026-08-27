@@ -35,9 +35,11 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 - [Project Bootstrap and Identity](docs/architecture/project-bootstrap-identity.md)
 - [Autonomous Runtime and Writer Safety](docs/architecture/autonomous-runtime.md)
 - [Environment & Resource Control Plane](docs/architecture/environment-resource-control.md)
+- [Change Intelligence](docs/architecture/change-intelligence.md)
 - [Context, Graph, Services, and Data Performance](docs/architecture/context-graph-data.md)
 - [Commercial Trust Architecture](docs/architecture/commercial-trust.md)
 - [5.19 Release Process](docs/release/5.19-release-process.md)
+- [Change Intelligence GA Report](docs/verification/change-intelligence-ga.md)
 
 ## 当前实现状态
 
@@ -48,6 +50,8 @@ Runtime 已建立 provider-neutral Adapter contract、Task/Agent/Lease/Ownership
 Environment & Resource Control Plane 使用可扩展 Provider 字符串、能力图、版本化 Profile、Task 级 Instance、通用 Resource Lease 和精确 Process Registry 管理本机直接环境、隔离工作区及组合 Provider。核心没有 `Native / Docker / Hybrid / Remote` 模式枚举，也不按 Provider 产品名分支。环境发现不产生选择状态；Verified Profile 才能被 Task 绑定。Runtime Start、Handoff、Crash Recovery 和 Completion 会验证或转移同一 Environment Instance，恢复前重新核验真实资源，终态先释放环境再归档 Writer 事实。已接管的外部环境与进程只解除 Hiker 绑定，不会被停止或删除。
 
 Live Adoption 通过 `attach` / `checkpoint` / `resume` 在自然 Turn 边界把 Community 5.18 当前 Goal、Task 与有效 Checkpoint 绑定到同一 5.19 Project；Provider Session 仅保存指纹。接管事务不会恢复旧 Lease、Agent、Process 或重复创建 Task/Worktree，后续 Context 只从有界活动索引解析。Community 侧保持薄检测、Bootstrap 与 fallback，Pro Runtime 仍是状态和恢复权威。
+
+Change Intelligence 复用现有 `ImpactGraphEngine` 和 `StateCoordinator`：LOCAL 变更走有界、零写快路径；共享、跨域和系统性变更才要求不可变 Change Contract、完整 Blast、单 Writer/Assurance/回滚策略。连续失败会进入 Fix Loop 和 Root Cause Mode，临时机制必须登记 Patch Debt，Scope/Invariant Guard 阻断越界与回归。观察结果只形成校准证据，不会自动污染权威依赖图。
 
 Context Resolver、`hiker resume`、结构化 Decision Memory、Intent/Dependency/Evidence Graph、结构化 Goal Change、50 服务语义拓扑、资源租约、SQLite 查询计划与并发证据、签名 Entitlement、设备激活、Offline Grace、签名 Module/Update、默认拒绝降级和签名回滚授权均已实现。Decision Memory 保留已拒绝方案及原因，并原子替代当前决策；Goal Change 接受模型给出的 `AFFECTED / UNAFFECTED / SUPERSEDED / REQUIRES_REVIEW` 分类，但只由 Runtime 验证 Task/Evidence 绑定并在一个 CAS 事务内提交 Goal Revision、Task 绑定和必要的证据失效。两者都不使用关键词替代语义判断。
 
@@ -61,6 +65,7 @@ Context Resolver、`hiker resume`、结构化 Decision Memory、Intent/Dependenc
 - COMM-G1/G2/G3/G16/G17 公私边界和热路径成本；
 - 状态、Handoff、Artifact、Migration、Release 的故障注入。
 - Environment Profile/Instance、资源冲突与容量、隔离工作区、跨 Task 进程保护、Provider Recovery/Release，以及冷历史有界读取。
+- Change Risk Probe、Change Contract/Blast、Fix Loop、Root Cause、Patch Debt、Scope/Invariant Guard、Outcome Calibration，以及真实迁移历史影子回放。
 
 这些结果分别属于 `DETERMINISTIC_VERIFIED`、`SIMULATION_PROVEN` 或 `REAL_INTEGRATION_PROVEN`；不等于客户现场长期运行。当前是发布候选，最终状态只由同一提交生成的商业 Gate 决定。
 
@@ -72,9 +77,10 @@ Community 5.18 导入的运行控制事实不会被激活为 5.19 Runtime Writer
 
 | 验证面 | 结果 | 证据等级 |
 | --- | --- | --- |
-| Unit / Integration | 当前源码 153/153 PASS（含 `FIELD-5.19-001`、Live Adoption、Environment & Resource Control Plane、Project Identity/Bootstrap、Legacy Finalize 与无全局 .NET 自包含执行回归）；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
+| Unit / Integration | 当前源码 172/172 PASS（含 `FIELD-5.19-001`、Live Adoption、Environment & Resource Control Plane、Change Intelligence、Project Identity/Bootstrap、Legacy Finalize 与无全局 .NET 自包含执行回归）；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
 | Community 5.18 回归 | 五插件合计 309/309 PASS；核心 82/82、Community→Pro Bridge 12/12，公开工作区保持干净 | `DETERMINISTIC_VERIFIED` |
 | Environment Control | 本机直接接管、真实隔离目录、组合 Provider、Runtime/Handoff/Recovery/Release 通过；1,024 条冷历史后 Context/Doctor P95 保持有界 | `REAL_INTEGRATION_PROVEN` |
+| Change Intelligence | LOCAL 零写快路径、共享 Blast、1024 条冷历史有界 Context、最近 3 个真实迁移修复提交的 Fix Loop 影子回放通过；真实 Field 返工改善尚未证明 | `REAL_INTEGRATION_PROVEN` |
 | 加速老化 | 12 个合成月份、1201 Task、120 Goal Revision、120 Handoff、60 Crash | `SIMULATION_PROVEN` |
 | 并发写入 | 1/2/4/8 Worker 均恰好一个 CAS 成功；Runtime Worker 结果需由当前提交重跑确认 | `SIMULATION_PROVEN` |
 | 大仓库 | 100,000 个非空语义文件；100 文件增量 `git status` 269.969 ms | `SIMULATION_PROVEN` |
@@ -87,6 +93,8 @@ Community 5.18 导入的运行控制事实不会被激活为 5.19 Runtime Writer
 Context 在加速老化第 12 月仍为 548 bytes、五次状态读取、零次冷历史扫描；State Query P95 0.024 ms，Context Build P95 0.136 ms，Resume P95 3.310 ms，Affected Scope P95 0.172 ms。
 
 Environment Release 专项验证中，加入 1,024 条冷环境历史前后，Task Context P95 为 0.291 ms → 0.336 ms、Environment Doctor P95 为 1.155 ms → 0.672 ms；状态读取保持 7 次，Context 保持 3,917 bytes。相同 Verified Profile 与 Active Instance 复用时 generation 保持 22 → 22，不产生额外状态写入。数值是本机证据，不外推为生产 SLA。
+
+Change Intelligence 专项验证中，LOCAL Probe P50/P95 为 0.0354/0.0465 ms，共享 Blast P50/P95 为 0.0939/0.3313 ms；加入 1,024 条冷 Change 历史前后，Context 都是 6 次状态读取、4,258 bytes。数值是本机证据，不外推为生产 SLA；影子回放不能替代真实 Field 的 Time To Accepted Change 指标。
 
 真实客户项目和真实日历 12 个月仍为 `NOT_YET_FIELD_PROVEN`；多 Provider Agent、PostgreSQL Pool Wait / Lock Wait / Saturation Point，以及宿主 Token 节省百分比仍为 `NOT_MEASURED`。
 
@@ -131,9 +139,10 @@ dotnet test -c Release
 | --- | --- |
 | `src/Hiker.Pro.Runtime/State` | SQLite/WAL 权威状态、CAS、事件、Artifact 元数据、Backup/Restore/Export |
 | `src/Hiker.Pro.Runtime/Environment` | Provider Contract、Profile/Instance、Resource/Process Lease、Doctor、Recovery 与 Release |
+| `src/Hiker.Pro.Runtime/ChangeIntelligence` | Change Risk、Contract/Blast、Fix Loop、Patch Debt、Scope/Invariant Guard 与 Outcome Calibration |
 | `src/Hiker.Pro.Runtime` | State、Task、Lease、Worktree、Checkpoint、Recovery、Context、Graph 与商业信任边界 |
 | `src/Hiker.Pro.Cli` | 面向工程项目的薄 CLI 入口 |
-| `tools/Hiker.Pro.Verification` | 老化、规模、真实服务、Codex Runtime 与 COMM-G1–G17 验证 |
+| `tools/Hiker.Pro.Verification` | 老化、规模、真实服务、Codex Runtime、Environment、Change Intelligence 与 COMM-G1–G17 验证 |
 | `tools/Hiker.Pro.Release` | 版本事实、签名 RC 构建、独立包校验与商业发布 Gate |
 | `tests/` | 单元、集成、故障注入与回归测试 |
 | `docs/` | 架构、Public/Pro 边界、证据分级与发布流程 |
@@ -150,6 +159,7 @@ dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario comme
 dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario commercial-security --root .
 dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario codex-runtime --root . --codex-execute
 dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario environment-control --root .
+dotnet run --project tools/Hiker.Pro.Verification -c Release -- --scenario change-intelligence --root .
 ```
 
 `real-services --docker` 会启动隔离的 PostgreSQL 测试容器；`codex-runtime --codex-execute` 会调用当前已安装的 Codex CLI。两者均需显式运行，不属于普通开发默认路径。

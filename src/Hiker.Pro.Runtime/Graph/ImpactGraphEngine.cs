@@ -17,7 +17,8 @@ public sealed record ImpactedNode(
     int Distance,
     string ViaRelation,
     ImpactDisposition Disposition,
-    string ReasonCode);
+    string ReasonCode,
+    string? RelationFingerprint = null);
 
 public sealed record ImpactAnalysisRequest(
     string ProjectId,
@@ -36,24 +37,25 @@ public sealed class ImpactGraphEngine(StateCoordinator state)
 {
     private static readonly HashSet<string> StrongRelations = new(StringComparer.OrdinalIgnoreCase)
     {
-        "DEPENDS_ON", "CONSUMES", "IMPLEMENTS", "CALLS", "READS", "WRITES", "PROVEN_BY", "VALIDATES", "OWNS_CONTRACT"
+        "DEPENDS_ON", "CONSUMES", "IMPLEMENTS", "CALLS", "OBSERVED_CALL", "READS", "WRITES", "PROVEN_BY", "VALIDATES",
+        "OWNS_CONTRACT", "USES_ENVIRONMENT", "BINDS_ENVIRONMENT", "HOLDS_RESOURCE", "ALLOCATES_RESOURCE", "RUNS_ON"
     };
 
     private static readonly HashSet<string> ReviewRelations = new(StringComparer.OrdinalIgnoreCase)
     {
-        "RELATED_TO", "DOCUMENTS", "OBSERVES"
+        "RELATED_TO", "DOCUMENTS", "OBSERVES", "CO_CHANGED_WITH"
     };
 
     public async Task<ImpactAnalysisResult> AnalyzeAsync(ImpactAnalysisRequest request, CancellationToken cancellationToken = default)
     {
         Validate(request);
-        var queue = new Queue<(StateKey Key, int Distance, string Via)>();
+        var queue = new Queue<(StateKey Key, int Distance, string Via, string? Fingerprint)>();
         var visited = new HashSet<string>(StringComparer.Ordinal);
         var results = new List<ImpactedNode>();
         foreach (var seed in request.Seeds)
         {
             var key = seed.Key.Normalize();
-            queue.Enqueue((key, 0, "SEED"));
+            queue.Enqueue((key, 0, "SEED", seed.SourceFingerprint));
         }
 
         var queries = 0;
@@ -84,23 +86,26 @@ public sealed class ImpactGraphEngine(StateCoordinator state)
                 current.Distance,
                 current.Via,
                 disposition,
-                current.Distance == 0 ? "DECLARED_CHANGE" : disposition == ImpactDisposition.Affected ? "TRANSITIVE_DEPENDENCY" : "AMBIGUOUS_RELATION"));
+                current.Distance == 0 ? "DECLARED_CHANGE" : disposition == ImpactDisposition.Affected ? "TRANSITIVE_DEPENDENCY" : "AMBIGUOUS_RELATION",
+                current.Fingerprint));
             if (current.Distance >= request.MaxDepth)
             {
                 truncated = truncated || queue.Count > 0;
                 continue;
             }
 
-            var incoming = await state.QueryDependenciesAsync(
+            var remaining = Math.Max(1, request.MaxNodes - results.Count + 1);
+            var incoming = await state.QueryDependenciesBoundedAsync(
                 request.ProjectId,
                 current.Key.Kind,
                 current.Key.EntityId,
                 outgoing: false,
+                Math.Min(4096, remaining),
                 cancellationToken).ConfigureAwait(false);
             queries++;
             foreach (var edge in incoming)
             {
-                queue.Enqueue((new StateKey(request.ProjectId, edge.FromKind, edge.FromId), current.Distance + 1, edge.Relation));
+                queue.Enqueue((new StateKey(request.ProjectId, edge.FromKind, edge.FromId), current.Distance + 1, edge.Relation, edge.Fingerprint));
             }
         }
 

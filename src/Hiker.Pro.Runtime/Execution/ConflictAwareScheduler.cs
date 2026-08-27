@@ -1,3 +1,4 @@
+using Hiker.Pro.ChangeIntelligence;
 using Hiker.Pro.Environment;
 using Hiker.Pro.State;
 
@@ -27,7 +28,8 @@ public sealed record SchedulingCandidate(
     IReadOnlyList<string>? DependencyScopes = null,
     IReadOnlyList<ResourceRequirement>? ResourceRequirements = null,
     string? EnvironmentProfileId = null,
-    string? EnvironmentInstanceId = null);
+    string? EnvironmentInstanceId = null,
+    ChangeExecutionPolicy? ChangePolicy = null);
 
 public sealed record SchedulingDisposition(
     string TaskId,
@@ -81,14 +83,18 @@ public sealed class ConflictAwareScheduler(StateCoordinator state)
             .Select(EnvironmentStateCodec.Parse<EnvironmentResourceLease>)
             .Where(static lease => lease.Status == "ACTIVE")
             .ToArray();
-        var highRiskPresent = candidates.Any(static candidate => candidate.Role == AgentLaneRole.Writer && candidate.Risk >= EngineeringRisk.High);
+        var highRiskPresent = candidates.Any(static candidate => candidate.Role == AgentLaneRole.Writer &&
+            (candidate.Risk >= EngineeringRisk.High || candidate.ChangePolicy?.RequiresSingleWriter == true));
         var writerCapacity = highRiskPresent ? 1 : maximumWriterLanes;
         var occupiedScopes = active.Select(static worktree => worktree.PredictedAffectedScopes).ToList();
         var admittedResources = new List<ResourceRequirement>();
         var admittedWriters = 0;
         var dispositions = new List<SchedulingDisposition>();
 
-        foreach (var candidate in candidates.OrderBy(static item => item.Role).ThenByDescending(static item => item.Risk).ThenBy(static item => item.TaskId, StringComparer.Ordinal))
+        foreach (var candidate in candidates.OrderBy(static item => item.Role)
+                     .ThenByDescending(static item => ChangePriority(item.ChangePolicy))
+                     .ThenByDescending(static item => item.Risk)
+                     .ThenBy(static item => item.TaskId, StringComparer.Ordinal))
         {
             Validate(candidate);
             var scopes = AffectedScopePolicy.Normalize(candidate.PredictedAffectedScopes.Concat(candidate.DependencyScopes ?? Array.Empty<string>()).ToArray());
@@ -100,7 +106,18 @@ public sealed class ConflictAwareScheduler(StateCoordinator state)
                 continue;
             }
 
-            var assuranceRequired = candidate.Risk >= EngineeringRisk.High;
+            if (candidate.ChangePolicy is { PatchingAllowed: false })
+            {
+                dispositions.Add(new SchedulingDisposition(candidate.TaskId, candidate.LaneId, ChangeControlStatuses.RootCauseRequired, "FIX_LOOP_PATCHING_DISABLED", scopes));
+                continue;
+            }
+            if (candidate.ChangePolicy is { RequiresSingleWriter: true, ChangeContractId: null or "" })
+            {
+                dispositions.Add(new SchedulingDisposition(candidate.TaskId, candidate.LaneId, "CHANGE_CONTRACT_REQUIRED", "HIGH_BLAST_CHANGE_HAS_NO_CONTRACT", scopes));
+                continue;
+            }
+
+            var assuranceRequired = candidate.Risk >= EngineeringRisk.High || candidate.ChangePolicy?.RequiresIndependentAssurance == true;
             var assuranceAvailable = !assuranceRequired || candidates.Any(item =>
                 item.Role == AgentLaneRole.Assurance && item.AssuresTaskId == candidate.TaskId && item.LaneId != candidate.LaneId && item.TaskId != candidate.TaskId);
             if (!assuranceAvailable)
@@ -153,7 +170,12 @@ public sealed class ConflictAwareScheduler(StateCoordinator state)
             admittedWriters++;
             occupiedScopes.Add(scopes);
             admittedResources.AddRange(requirements);
-            dispositions.Add(new SchedulingDisposition(candidate.TaskId, candidate.LaneId, "ADMITTED", assuranceRequired ? "HIGH_RISK_WITH_ASSURANCE" : "DISJOINT_WRITER", scopes));
+            var reason = candidate.ChangePolicy?.RequiresExclusiveMutation == true
+                ? "SYSTEMIC_CHANGE_EXCLUSIVE_MUTATION"
+                : assuranceRequired
+                    ? "HIGH_RISK_WITH_ASSURANCE"
+                    : "DISJOINT_WRITER";
+            dispositions.Add(new SchedulingDisposition(candidate.TaskId, candidate.LaneId, "ADMITTED", reason, scopes));
         }
 
         var admitted = dispositions.Count(static item => item.Status == "ADMITTED");
@@ -178,5 +200,19 @@ public sealed class ConflictAwareScheduler(StateCoordinator state)
         {
             EnvironmentContractValidation.Requirement(requirement);
         }
+        if (candidate.ChangePolicy is { RequiresExclusiveMutation: true, RequiresSingleWriter: false } ||
+            candidate.ChangePolicy is { RootCauseModeRequired: true, PatchingAllowed: true })
+        {
+            throw new ArgumentException("Change scheduling policy is internally inconsistent", nameof(candidate));
+        }
     }
+
+    private static int ChangePriority(ChangeExecutionPolicy? policy) => policy?.Classification switch
+    {
+        ChangeRiskClasses.Systemic => 4,
+        ChangeRiskClasses.CrossCutting => 3,
+        ChangeRiskClasses.Shared => 2,
+        ChangeRiskClasses.Local => 1,
+        _ => 0
+    };
 }
