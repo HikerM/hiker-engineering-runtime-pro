@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Hiker.Pro.State;
+using Hiker.Pro.Storage;
 
 namespace Hiker.Pro.Context;
 
@@ -11,12 +13,26 @@ public sealed class ContextResolver(IStateStore stateStore, TimeProvider? timePr
 
     public async Task<VerifiedContextPackage> ResolveAsync(ContextRequest request, CancellationToken cancellationToken = default)
     {
+        var timer = Stopwatch.StartNew();
         Validate(request);
         var reads = 0;
+        var graphQueries = 0;
+        var staleRejected = 0;
+        var supersededRejected = 0;
+        var authorityConflicts = 0;
         var candidates = new List<ContextItem>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        await AddExactAsync(new StateKey(request.ProjectId, EntityKinds.Goal, request.GoalId), ContextTemperature.Hot).ConfigureAwait(false);
-        await AddExactAsync(new StateKey(request.ProjectId, EntityKinds.Task, request.TaskId), ContextTemperature.Hot).ConfigureAwait(false);
+        var goal = await ReadRootAsync(new StateKey(request.ProjectId, EntityKinds.Goal, request.GoalId)).ConfigureAwait(false);
+        var task = await ReadRootAsync(new StateKey(request.ProjectId, EntityKinds.Task, request.TaskId)).ConfigureAwait(false);
+        if (goal.GoalRevision != task.GoalRevision)
+        {
+            throw new InvalidOperationException("Current Goal and Task revisions do not match");
+        }
+        candidates.Add(ToItem(goal, ContextTemperature.Hot, maxPayloadBytes: 4096));
+        candidates.Add(ToItem(task, ContextTemperature.Hot, maxPayloadBytes: 4096));
+        seen.Add($"{EntityKinds.Goal}|{request.GoalId}");
+        seen.Add($"{EntityKinds.Task}|{request.TaskId}");
+        var currentRevision = task.GoalRevision;
 
         var outgoing = await stateStore.QueryDependenciesBoundedAsync(
             request.ProjectId,
@@ -26,6 +42,7 @@ public sealed class ContextResolver(IStateStore stateStore, TimeProvider? timePr
             limit: 257,
             cancellationToken: cancellationToken).ConfigureAwait(false);
         reads++;
+        graphQueries++;
         foreach (var edge in outgoing.Take(256))
         {
             var temperature = edge.ToKind is EntityKinds.Decision or EntityKinds.Service or EntityKinds.Contract
@@ -41,6 +58,7 @@ public sealed class ContextResolver(IStateStore stateStore, TimeProvider? timePr
 
         var ordered = candidates
             .OrderBy(static item => item.Temperature)
+            .ThenBy(static item => AuthorityPriority(ClassifyAuthority(item)))
             .ThenBy(static item => Priority(item.Kind))
             .ThenByDescending(static item => item.Generation)
             .ToArray();
@@ -69,6 +87,38 @@ public sealed class ContextResolver(IStateStore stateStore, TimeProvider? timePr
         var metrics = await stateStore.GetMetricsAsync(cancellationToken).ConfigureAwait(false);
         reads++;
         var fingerprint = Fingerprint(selected);
+        timer.Stop();
+        var resolvedAt = _clock.GetUtcNow();
+        var selectedRefs = ContractCollections.Freeze(selected.Select(static item => item.Ref));
+        var receiptFingerprint = ReceiptFingerprint(
+            request,
+            metrics.Generation,
+            selectedRefs,
+            bytes,
+            reads,
+            graphQueries,
+            staleRejected,
+            supersededRejected,
+            authorityConflicts,
+            fingerprint);
+        var receipt = new RetrievalReceipt(
+            request.ProjectId,
+            request.GoalId,
+            request.TaskId,
+            metrics.Generation,
+            selectedRefs,
+            bytes,
+            reads,
+            graphQueries,
+            0,
+            0,
+            staleRejected,
+            supersededRejected,
+            authorityConflicts,
+            fingerprint,
+            receiptFingerprint,
+            timer.Elapsed.TotalMilliseconds,
+            resolvedAt);
         return new VerifiedContextPackage(
             "hiker-context/v1",
             request.ProjectId,
@@ -80,7 +130,28 @@ public sealed class ContextResolver(IStateStore stateStore, TimeProvider? timePr
             reads,
             truncated,
             fingerprint,
-            _clock.GetUtcNow());
+            resolvedAt,
+            receipt);
+
+        async Task<StateSnapshot> ReadRootAsync(StateKey key)
+        {
+            var state = await stateStore.ReadAsync(key.Normalize(), cancellationToken).ConfigureAwait(false);
+            reads++;
+            if (state is null)
+            {
+                throw new InvalidOperationException($"Current context root does not exist: {key.Kind}/{key.EntityId}");
+            }
+            if (state.Lifecycle != StateLifecycle.Valid)
+            {
+                throw new InvalidOperationException($"Current context root is not valid: {key.Kind}/{key.EntityId}/{state.Lifecycle}");
+            }
+            var authority = ClassifyAuthority(ToItem(state, ContextTemperature.Hot, 64));
+            if (authority is not (RetrievalAuthority.AuthoritativeCurrent or RetrievalAuthority.VerifiedDerived))
+            {
+                throw new InvalidOperationException($"Current context root has non-current authority: {key.Kind}/{key.EntityId}/{state.Authority}");
+            }
+            return state;
+        }
 
         async Task AddExactAsync(StateKey key, ContextTemperature temperature)
         {
@@ -93,14 +164,54 @@ public sealed class ContextResolver(IStateStore stateStore, TimeProvider? timePr
 
             var state = await stateStore.ReadAsync(normalized, cancellationToken).ConfigureAwait(false);
             reads++;
-            if (state is null || state.Lifecycle is StateLifecycle.Archived or StateLifecycle.Corrupt or StateLifecycle.Incompatible)
+            if (state is null)
             {
                 return;
             }
 
-            candidates.Add(ToItem(state, temperature, maxPayloadBytes: 4096));
+            if (state.Lifecycle == StateLifecycle.Stale)
+            {
+                staleRejected++;
+                return;
+            }
+            if (state.Lifecycle == StateLifecycle.Superseded)
+            {
+                supersededRejected++;
+                return;
+            }
+            if (state.Lifecycle != StateLifecycle.Valid)
+            {
+                return;
+            }
+            if (state.GoalRevision != 0 && state.GoalRevision != currentRevision)
+            {
+                staleRejected++;
+                return;
+            }
+
+            var item = ToItem(state, temperature, maxPayloadBytes: 4096);
+            if (ClassifyAuthority(item) is not (RetrievalAuthority.AuthoritativeCurrent or RetrievalAuthority.VerifiedDerived))
+            {
+                authorityConflicts++;
+                return;
+            }
+
+            candidates.Add(item);
         }
     }
+
+    internal static RetrievalAuthority ClassifyAuthority(ContextItem item) => item.AuthorityClass;
+
+    private static int AuthorityPriority(RetrievalAuthority authority) => authority switch
+    {
+        RetrievalAuthority.AuthoritativeCurrent => 0,
+        RetrievalAuthority.VerifiedDerived => 1,
+        RetrievalAuthority.RuntimeObservation => 2,
+        RetrievalAuthority.Historical => 3,
+        RetrievalAuthority.LegacyPreserved => 4,
+        RetrievalAuthority.Cache => 5,
+        _ => 6
+    };
 
     internal static ContextItem ToItem(StateSnapshot state, ContextTemperature temperature, int maxPayloadBytes)
     {
@@ -114,8 +225,25 @@ public sealed class ContextResolver(IStateStore stateStore, TimeProvider? timePr
             state.Lifecycle,
             temperature,
             state.Authority,
+            ClassifyAuthority(state, temperature),
             state.SourceFingerprint,
             payload);
+    }
+
+    private static RetrievalAuthority ClassifyAuthority(StateSnapshot state, ContextTemperature temperature)
+    {
+        if (temperature == ContextTemperature.Cold || state.Lifecycle != StateLifecycle.Valid)
+            return RetrievalAuthority.Historical;
+        if (state.Retention is RetentionTier.Cache or RetentionTier.Temp)
+            return RetrievalAuthority.Cache;
+        if (state.Authority.Contains("COMMUNITY_5_18_IMPORT", StringComparison.OrdinalIgnoreCase) ||
+            state.Authority.Contains("LEGACY", StringComparison.OrdinalIgnoreCase))
+            return RetrievalAuthority.LegacyPreserved;
+        if (state.Key.Kind is EntityKinds.EnvironmentObservation or EntityKinds.ServiceProcess)
+            return RetrievalAuthority.RuntimeObservation;
+        if (state.Key.Kind is EntityKinds.Evidence or EntityKinds.Test)
+            return RetrievalAuthority.VerifiedDerived;
+        return RetrievalAuthority.AuthoritativeCurrent;
     }
 
     private static string BoundUtf8(string value, int maxBytes)
@@ -163,6 +291,34 @@ public sealed class ContextResolver(IStateStore stateStore, TimeProvider? timePr
     private static string Fingerprint(IEnumerable<ContextItem> items)
     {
         var canonical = string.Join('\n', items.Select(static item => $"{item.Ref}|{item.Generation}|{item.SourceFingerprint}|{item.Lifecycle}"));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+    }
+
+    private static string ReceiptFingerprint(
+        ContextRequest request,
+        long generation,
+        IReadOnlyList<string> selected,
+        int bytes,
+        int reads,
+        int graphQueries,
+        int staleRejected,
+        int supersededRejected,
+        int authorityConflicts,
+        string contextFingerprint)
+    {
+        var canonical = string.Join('\n',
+            request.ProjectId,
+            request.GoalId,
+            request.TaskId,
+            generation,
+            string.Join('|', selected),
+            bytes,
+            reads,
+            graphQueries,
+            staleRejected,
+            supersededRejected,
+            authorityConflicts,
+            contextFingerprint);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 

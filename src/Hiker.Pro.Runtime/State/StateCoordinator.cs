@@ -1,5 +1,7 @@
 namespace Hiker.Pro.State;
 
+using Hiker.Pro.Storage;
+
 public sealed record ImmutableReasoningSnapshot(
     StateSnapshot? State,
     long StoreGeneration,
@@ -149,6 +151,90 @@ public sealed class StateCoordinator
             await _store.RegisterArtifactAsync(artifact, token).ConfigureAwait(false);
             return true;
         }, cancellationToken);
+
+    public Task LinkArtifactAsync(ArtifactLink link, CancellationToken cancellationToken = default) =>
+        WithWriterAsync(async token =>
+        {
+            await _store.LinkArtifactAsync(link, token).ConfigureAwait(false);
+            return true;
+        }, cancellationToken);
+
+    public Task<IReadOnlyList<ArtifactReachabilityRecord>> AnalyzeArtifactReachabilityAsync(
+        string projectId,
+        DateTimeOffset retentionCutoff,
+        int limit = 100_000,
+        CancellationToken cancellationToken = default) =>
+        _store.AnalyzeArtifactReachabilityAsync(projectId, retentionCutoff, limit, cancellationToken);
+
+    public Task<ArtifactGcResult> CollectUnreachableArtifactsAsync(
+        string operationId,
+        string projectId,
+        DateTimeOffset retentionCutoff,
+        CancellationToken cancellationToken = default) =>
+        WithWriterAsync(token => _store.CollectUnreachableArtifactsAsync(operationId, projectId, retentionCutoff, token), cancellationToken);
+
+    public Task<RuntimeStateSnapshot> CreateRuntimeSnapshotAsync(
+        string operationId,
+        string projectId,
+        CancellationToken cancellationToken = default) =>
+        WithWriterAsync(token => _store.CreateRuntimeSnapshotAsync(operationId, projectId, token), cancellationToken);
+
+    public Task<RuntimeStateSnapshot?> ReadRuntimeSnapshotAsync(
+        string projectId,
+        string snapshotId,
+        CancellationToken cancellationToken = default) =>
+        _store.ReadRuntimeSnapshotAsync(projectId, snapshotId, cancellationToken);
+
+    public Task<SnapshotRecoveryProjection> ReconstructSnapshotAsync(
+        string projectId,
+        string snapshotId,
+        CancellationToken cancellationToken = default) =>
+        _store.ReconstructSnapshotAsync(projectId, snapshotId, cancellationToken);
+
+    public Task<EventRollupResult> RollupEventsAsync(EventRollupRequest request, CancellationToken cancellationToken = default) =>
+        WithWriterAsync(token => _store.RollupEventsAsync(request, token), cancellationToken);
+
+    public Task<OperationRetentionResult> RetainOperationsAsync(
+        string operationId,
+        string projectId,
+        DateTimeOffset completedBefore,
+        int keepRecent,
+        CancellationToken cancellationToken = default) =>
+        WithWriterAsync(token => _store.RetainOperationsAsync(operationId, projectId, completedBefore, keepRecent, token), cancellationToken);
+
+    public Task<DependencyRetentionResult> RetainDependenciesAsync(
+        string operationId,
+        string projectId,
+        DateTimeOffset olderThan,
+        CancellationToken cancellationToken = default) =>
+        WithWriterAsync(token => _store.RetainDependenciesAsync(operationId, projectId, olderThan, token), cancellationToken);
+
+    public Task<EntityRetentionResult> RetainEntitiesAsync(
+        string operationId,
+        string projectId,
+        DateTimeOffset olderThan,
+        CancellationToken cancellationToken = default) =>
+        WithWriterAsync(token => _store.RetainEntitiesAsync(operationId, projectId, olderThan, token), cancellationToken);
+
+    public Task<StateSnapshot?> ReadArchivedStateAsync(StateKey key, CancellationToken cancellationToken = default) =>
+        _store.ReadArchivedStateAsync(key, cancellationToken);
+
+    public Task<StorageMetrics> GetStorageMetricsAsync(string projectId, CancellationToken cancellationToken = default) =>
+        _store.GetStorageMetricsAsync(projectId, cancellationToken);
+
+    public Task<StorageDoctorReport> StorageHealthCheckAsync(
+        string projectId,
+        StorageHealthMode mode,
+        CancellationToken cancellationToken = default) =>
+        _store.StorageHealthCheckAsync(projectId, mode, cancellationToken);
+
+    public Task<StorageCompactionResult> CompactStorageAsync(string operationId, string projectId, CancellationToken cancellationToken = default) =>
+        WithWriterAsync(token => _store.CompactStorageAsync(operationId, projectId, token), cancellationToken);
+
+    public Task<IncrementalMigrationInventoryResult> InventoryLegacyStorageAsync(
+        string projectId,
+        CancellationToken cancellationToken = default) =>
+        WithWriterAsync(token => _store.InventoryLegacyStorageAsync(projectId, token), cancellationToken);
 
     private async Task<T> WithWriterAsync<T>(
         Func<CancellationToken, Task<T>> action,

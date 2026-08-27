@@ -406,6 +406,9 @@ public sealed partial class SqliteStateStore
         command.Parameters.AddWithValue("$retention", SqliteMapping.EnumToken(artifact.Retention));
         command.Parameters.AddWithValue("$created", artifact.CreatedAt.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await UpsertArtifactVerificationAsync(connection, artifact, cancellationToken).ConfigureAwait(false);
+        await InsertArtifactLinkIfPresentAsync(connection, artifact, artifact.TaskId is null ? null : EntityKinds.Task, artifact.TaskId, "TASK_OUTPUT", cancellationToken).ConfigureAwait(false);
+        await InsertArtifactLinkIfPresentAsync(connection, artifact, artifact.EvidenceId is null ? null : EntityKinds.Evidence, artifact.EvidenceId, "EVIDENCE_CONTENT", cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlySet<string>> ReferencedArtifactHashesAsync(CancellationToken cancellationToken = default)

@@ -10,9 +10,12 @@ public sealed class ProjectLayout
         DatabasePath = Path.Combine(StateDirectory, "hiker-state.db");
         ArtifactsRoot = Path.Combine(AiRoot, "artifacts", "sha256");
         ArchiveRoot = Path.Combine(AiRoot, "archive");
+        EventArchiveRoot = Path.Combine(ArchiveRoot, "events");
+        ArtifactBackupRoot = Path.Combine(ArchiveRoot, "artifact-backups");
         ExportsRoot = Path.Combine(AiRoot, "exports");
         ProjectionsRoot = Path.Combine(AiRoot, "projections");
         CacheRoot = Path.Combine(AiRoot, "cache");
+        FastDoctorReceiptPath = Path.Combine(CacheRoot, "storage-fast-doctor-receipt.json");
     }
 
     public string ProjectRoot { get; }
@@ -21,9 +24,12 @@ public sealed class ProjectLayout
     public string DatabasePath { get; }
     public string ArtifactsRoot { get; }
     public string ArchiveRoot { get; }
+    public string EventArchiveRoot { get; }
+    public string ArtifactBackupRoot { get; }
     public string ExportsRoot { get; }
     public string ProjectionsRoot { get; }
     public string CacheRoot { get; }
+    public string FastDoctorReceiptPath { get; }
 
     public string ResolveAiRelativePath(string relativePath)
     {
@@ -47,6 +53,8 @@ public sealed class ProjectLayout
         Directory.CreateDirectory(StateDirectory);
         Directory.CreateDirectory(ArtifactsRoot);
         Directory.CreateDirectory(ArchiveRoot);
+        Directory.CreateDirectory(EventArchiveRoot);
+        Directory.CreateDirectory(ArtifactBackupRoot);
         Directory.CreateDirectory(ExportsRoot);
         Directory.CreateDirectory(ProjectionsRoot);
         Directory.CreateDirectory(CacheRoot);

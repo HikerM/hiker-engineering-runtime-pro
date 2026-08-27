@@ -173,6 +173,7 @@ public sealed class LegacyInventoryCompatibilityTests
         var ai = Path.Combine(root, ".ai");
         return Directory.EnumerateFiles(ai, "*", SearchOption.AllDirectories)
             .Where(path => !Path.GetRelativePath(ai, path).StartsWith($"state{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) &&
+                           !Path.GetRelativePath(ai, path).StartsWith($"cache{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) &&
                            !Path.GetRelativePath(ai, path).StartsWith($"archive{Path.DirectorySeparatorChar}state-backups", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(
                 path => Path.GetRelativePath(ai, path).Replace('\\', '/'),

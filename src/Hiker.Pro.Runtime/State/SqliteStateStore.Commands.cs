@@ -12,7 +12,12 @@ public sealed partial class SqliteStateStore
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT request_fingerprint, generation, result_json FROM operations WHERE operation_id=$id AND status='COMPLETE';";
+        command.CommandText = """
+            SELECT request_fingerprint,generation,result_json FROM operations WHERE operation_id=$id AND status='COMPLETE'
+            UNION ALL
+            SELECT request_fingerprint,generation,result_json FROM archived_operations WHERE operation_id=$id AND status='COMPLETE'
+            LIMIT 1;
+            """;
         command.Parameters.AddWithValue("$id", operationId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -108,6 +113,7 @@ public sealed partial class SqliteStateStore
         command.Parameters.AddWithValue("$payload", mutation.PayloadJson);
         command.Parameters.AddWithValue("$updated", updatedAt.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await InsertStateDeltaAsync(connection, transaction, mutation, generation, updatedAt, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task UpsertEdgeAsync(

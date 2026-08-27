@@ -35,6 +35,12 @@ try
         case "change-intelligence":
             checks.AddRange(await new ChangeIntelligenceScenario(options).RunAsync());
             break;
+        case "storage-lifecycle":
+            checks.AddRange(await new StorageLifecycleScenario().RunAsync());
+            break;
+        case "storage-field":
+            checks.AddRange(await new StorageFieldScenario(options).RunAsync());
+            break;
         case "all":
             checks.AddRange(await new StateAgingScenario().RunAsync());
             checks.AddRange(await new LargeRepositoryScenario(options).RunAsync());
@@ -42,6 +48,7 @@ try
             checks.AddRange(await new CommercialBoundaryScenario(options).RunAsync());
             checks.AddRange(await new EnvironmentControlPlaneScenario().RunAsync());
             checks.AddRange(await new ChangeIntelligenceScenario(options).RunAsync());
+            checks.AddRange(await new StorageLifecycleScenario().RunAsync());
             break;
         default:
             throw new ArgumentException($"Unknown scenario: {options.Scenario}");
@@ -82,6 +89,7 @@ static VerificationOptions Parse(string[] values)
     var repository = Directory.GetCurrentDirectory();
     string? output = null;
     string? publicRoot = null;
+    string? fieldRoot = null;
     var docker = false;
     var codexExecute = false;
     var fileScale = 100_000;
@@ -101,6 +109,9 @@ static VerificationOptions Parse(string[] values)
             case "--public-root" when index + 1 < values.Length:
                 publicRoot = Path.GetFullPath(values[++index]);
                 break;
+            case "--field-root" when index + 1 < values.Length:
+                fieldRoot = Path.GetFullPath(values[++index]);
+                break;
             case "--docker":
                 docker = true;
                 break;
@@ -119,5 +130,5 @@ static VerificationOptions Parse(string[] values)
         throw new ArgumentException("Verification root or file scale is invalid");
     }
 
-    return new VerificationOptions(scenario, repository, output, publicRoot, docker, codexExecute, fileScale);
+    return new VerificationOptions(scenario, repository, output, publicRoot, fieldRoot, docker, codexExecute, fileScale);
 }

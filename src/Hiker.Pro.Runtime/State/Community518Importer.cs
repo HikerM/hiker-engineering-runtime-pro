@@ -9,9 +9,10 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
     public async Task<CommunityImportReport> ImportAsync(string projectId, CancellationToken cancellationToken = default)
     {
         var normalizedProject = new StateKey(projectId, EntityKinds.Project, "project").Normalize().ProjectId;
-        var inventory = LegacyAiInventoryInspector.Inspect(layout);
         var markerKey = new StateKey(normalizedProject, EntityKinds.Migration, "community-5.18");
         var marker = await state.ReadAsync(markerKey, cancellationToken).ConfigureAwait(false);
+        var incrementalInventory = await state.InventoryLegacyStorageAsync(normalizedProject, cancellationToken).ConfigureAwait(false);
+        var inventory = LegacyAiInventoryInspector.Inspect(layout, marker is null || incrementalInventory.ChangedSegments > 0);
         if (inventory.UnknownItems.Count > 0)
         {
             return new CommunityImportReport(

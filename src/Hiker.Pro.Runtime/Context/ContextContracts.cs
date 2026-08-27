@@ -1,4 +1,5 @@
 using Hiker.Pro.State;
+using Hiker.Pro.Storage;
 
 namespace Hiker.Pro.Context;
 
@@ -26,6 +27,7 @@ public sealed record ContextItem(
     StateLifecycle Lifecycle,
     ContextTemperature Temperature,
     string Authority,
+    RetrievalAuthority AuthorityClass,
     string SourceFingerprint,
     string PayloadJson);
 
@@ -40,7 +42,8 @@ public sealed record VerifiedContextPackage(
     int StateReads,
     bool Truncated,
     string Fingerprint,
-    DateTimeOffset ResolvedAt);
+    DateTimeOffset ResolvedAt,
+    RetrievalReceipt? RetrievalReceipt = null);
 
 public sealed record ProjectResumeSummary(
     string ProjectId,

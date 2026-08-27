@@ -1,5 +1,6 @@
 using Hiker.Pro.Execution;
 using Hiker.Pro.State;
+using Hiker.Pro.Storage;
 
 namespace Hiker.Pro.Diagnostics;
 
@@ -12,7 +13,16 @@ public sealed class AdvancedDoctor(
 
     public async Task<HealthReport> CheckProjectAsync(string projectId, CancellationToken cancellationToken = default)
     {
-        var baseHealth = await stateStore.HealthCheckAsync(cancellationToken).ConfigureAwait(false);
+        var storage = await stateStore.StorageHealthCheckAsync(projectId, StorageHealthMode.Fast, cancellationToken).ConfigureAwait(false);
+        return await CheckProjectAsync(projectId, storage, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<HealthReport> CheckProjectAsync(
+        string projectId,
+        StorageDoctorReport storage,
+        CancellationToken cancellationToken = default)
+    {
+        var baseHealth = new HealthReport(storage.Status, storage.Findings);
         var findings = baseHealth.Findings.ToList();
         var legacyRuntime = await stateStore.InspectLegacyRuntimeAsync(projectId, cancellationToken).ConfigureAwait(false);
         foreach (var fact in legacyRuntime.FinalizableFacts.Concat(legacyRuntime.ReviewFacts))

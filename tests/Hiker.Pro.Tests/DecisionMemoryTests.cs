@@ -28,7 +28,7 @@ public sealed class DecisionMemoryTests
 
         var context = await new ContextResolver(project.Store).ResolveAsync(new ContextRequest("project-1", "task-1", "goal-1"));
         Assert.Contains(context.Items, static item => item.EntityId == "decision-rejected" && item.PayloadJson.Contains("VALID_BUT_USER_REJECTED", StringComparison.Ordinal));
-        Assert.Contains(context.Items, static item => item.EntityId == "decision-a" && item.Lifecycle == StateLifecycle.Superseded);
+        Assert.DoesNotContain(context.Items, static item => item.EntityId == "decision-a");
         Assert.Contains(context.Items, static item => item.EntityId == "decision-b" && item.PayloadJson.Contains("APPROVED_CURRENT", StringComparison.Ordinal));
         await Assert.ThrowsAsync<InvalidOperationException>(() => memory.SupersedeAsync(
             replacement with { Decision = replacement.Decision with { ReasonCode = "DIFFERENT_REASON" } },

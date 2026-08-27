@@ -5,6 +5,7 @@ using Hiker.Pro.Environment;
 using Hiker.Pro.Execution;
 using Hiker.Pro.Release;
 using Hiker.Pro.State;
+using Hiker.Pro.Storage;
 
 internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions json)
 {
@@ -46,20 +47,23 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
                     }
 
                     var active = await bootstrap.RequireActiveAsync(ProjectBootstrapIntent.Read, suppliedProjectId).ConfigureAwait(false);
-                    var health = await new AdvancedDoctor(store, new ProcessIdentityProbe()).CheckProjectAsync(active.ProjectId!).ConfigureAwait(false);
+                    var mode = args.Contains("--deep", StringComparer.Ordinal) ? StorageHealthMode.Deep : StorageHealthMode.Fast;
+                    var storage = await state.StorageHealthCheckAsync(active.ProjectId!, mode).ConfigureAwait(false);
+                    var health = await new AdvancedDoctor(store, new ProcessIdentityProbe()).CheckProjectAsync(active.ProjectId!, storage).ConfigureAwait(false);
                     var environment = await CheckEnvironmentAsync(state, active.ProjectId!).ConfigureAwait(false);
                     var status = health.Status == "BLOCKED" || environment?.Status == "BLOCKED" ? "BLOCKED" : health.Status;
-                    Write(new { status, health.Findings, environment, project = active });
+                    Write(new { status, health.Findings, storage, environment, project = active });
                     return status == "BLOCKED" ? 2 : 0;
                 }
             case "status":
                 {
                     var active = await bootstrap.RequireActiveAsync(ProjectBootstrapIntent.Read, suppliedProjectId).ConfigureAwait(false);
-                    var health = await new AdvancedDoctor(store, new ProcessIdentityProbe()).CheckProjectAsync(active.ProjectId!).ConfigureAwait(false);
+                    var storage = await state.StorageHealthCheckAsync(active.ProjectId!, StorageHealthMode.Fast).ConfigureAwait(false);
+                    var health = await new AdvancedDoctor(store, new ProcessIdentityProbe()).CheckProjectAsync(active.ProjectId!, storage).ConfigureAwait(false);
                     var environment = await CheckEnvironmentAsync(state, active.ProjectId!).ConfigureAwait(false);
                     var metrics = await store.GetMetricsAsync().ConfigureAwait(false);
                     var ok = health.Status != "BLOCKED" && environment?.Status != "BLOCKED";
-                    Write(new { ok, project = active, health, environment, metrics });
+                    Write(new { ok, project = active, health, storage, environment, metrics });
                     return ok ? 0 : 2;
                 }
             case "backup":
@@ -68,6 +72,43 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
                     var backup = await new StateBackupService(layout).CreateAsync(ValueAfter(args, "--output")).ConfigureAwait(false);
                     Write(new { project_id = active.ProjectId, backup });
                     return 0;
+                }
+            case "artifact-backup":
+                {
+                    var active = await bootstrap.RequireActiveAsync(ProjectBootstrapIntent.Backup, suppliedProjectId).ConfigureAwait(false);
+                    var backup = await new IncrementalArtifactBackupService(layout, state)
+                        .CreateAsync(active.ProjectId!, ValueAfter(args, "--output")).ConfigureAwait(false);
+                    Write(new { project_id = active.ProjectId, backup });
+                    return 0;
+                }
+            case "storage-status":
+                {
+                    var active = await bootstrap.RequireActiveAsync(ProjectBootstrapIntent.Read, suppliedProjectId).ConfigureAwait(false);
+                    var metrics = await state.GetStorageMetricsAsync(active.ProjectId!).ConfigureAwait(false);
+                    var health = await state.StorageHealthCheckAsync(active.ProjectId!, StorageHealthMode.Fast).ConfigureAwait(false);
+                    Write(new { project_id = active.ProjectId, metrics, health });
+                    return health.Status == "BLOCKED" ? 2 : 0;
+                }
+            case "storage-maintain":
+                {
+                    var operationId = ValueAfter(args, "--operation-id")
+                        ?? throw new ArgumentException("storage-maintain requires --operation-id <stable id>");
+                    var historicalBefore = ParseTimestamp(args, "--historical-before");
+                    var artifactBefore = ParseTimestamp(args, "--artifact-before");
+                    var keepEvents = ParseInteger(args, "--keep-events", 1_000);
+                    var keepOperations = ParseInteger(args, "--keep-operations", 10_000);
+                    var active = await bootstrap.RequireActiveAsync(ProjectBootstrapIntent.Backup, suppliedProjectId).ConfigureAwait(false);
+                    var result = await new StorageLifecycleMaintenanceCoordinator(state).RunAsync(
+                        operationId,
+                        active.ProjectId!,
+                        new StorageMaintenancePolicy(
+                            historicalBefore,
+                            artifactBefore,
+                            keepEvents,
+                            keepOperations,
+                            args.Contains("--compact", StringComparer.Ordinal))).ConfigureAwait(false);
+                    Write(new { project_id = active.ProjectId, result });
+                    return result.Status == "COMPLETE" ? 0 : 2;
                 }
             case "attach":
                 {
@@ -288,6 +329,23 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
         }
 
         return result;
+    }
+
+    private static DateTimeOffset ParseTimestamp(string[] values, string name)
+    {
+        var value = ValueAfter(values, name) ?? throw new ArgumentException($"storage-maintain requires {name} <ISO-8601>");
+        if (!DateTimeOffset.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var timestamp))
+            throw new ArgumentException($"{name} must be an ISO-8601 timestamp");
+        return timestamp.ToUniversalTime();
+    }
+
+    private static int ParseInteger(string[] values, string name, int fallback)
+    {
+        var value = ValueAfter(values, name);
+        if (value is null) return fallback;
+        if (!int.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+            throw new ArgumentException($"{name} must be an integer");
+        return parsed;
     }
 
     private static ProviderSession ResolveProviderSession(string[] args)

@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Hiker.Pro.Release;
+using Hiker.Pro.Storage;
 
 namespace Hiker.Pro.State;
 
@@ -154,6 +155,34 @@ internal static class SqliteSchema
         migration.Parameters.AddWithValue("$checksum", SchemaChecksum);
         await migration.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        await StorageSchema.InitializeAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    public static async Task<bool> IsCurrentAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var tables = connection.CreateCommand();
+        tables.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('metadata','entities','operations','engineering_events','dependency_edges','materialized_views','artifacts','schema_migrations','artifact_verifications','artifact_links','runtime_snapshots','state_deltas','event_segments','event_dedup','archived_operations','archived_dependency_edges','archived_entities','storage_maintenance','storage_counters','migration_inventory_segments');";
+        var tableCount = Convert.ToInt32(await tables.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+        if (tableCount != 20)
+        {
+            return false;
+        }
+
+        await using var migrations = connection.CreateCommand();
+        migrations.CommandText = "SELECT version, checksum FROM schema_migrations WHERE version IN ($core, $storage);";
+        migrations.Parameters.AddWithValue("$core", CurrentVersion);
+        migrations.Parameters.AddWithValue("$storage", StorageSchema.ExtensionVersion);
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        await using var reader = await migrations.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            values[reader.GetString(0)] = reader.GetString(1);
+        }
+
+        return values.TryGetValue(CurrentVersion, out var coreChecksum) &&
+               string.Equals(coreChecksum, SchemaChecksum, StringComparison.Ordinal) &&
+               values.TryGetValue(StorageSchema.ExtensionVersion, out var storageChecksum) &&
+               string.Equals(storageChecksum, StorageSchema.Checksum, StringComparison.Ordinal);
     }
 
     public static string SchemaChecksum => Convert.ToHexString(

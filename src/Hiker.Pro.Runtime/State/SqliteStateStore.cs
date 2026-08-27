@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Hiker.Pro.Storage;
 using Microsoft.Data.Sqlite;
 
 namespace Hiker.Pro.State;
@@ -9,6 +10,8 @@ public sealed partial class SqliteStateStore : IStateStore
     private const string SnapshotColumns = "project_id, kind, entity_id, generation, goal_revision, lifecycle, retention, authority, schema_version, source_fingerprint, dependency_fingerprint, payload_json, updated_at";
     private readonly ProjectLayout _layout;
     private readonly string _connectionString;
+    private readonly SemaphoreSlim _initializationGate = new(1, 1);
+    private bool _initialized;
 
     public SqliteStateStore(ProjectLayout layout)
     {
@@ -24,9 +27,31 @@ public sealed partial class SqliteStateStore : IStateStore
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        _layout.EnsureDirectories();
-        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
-        await SqliteSchema.InitializeAsync(connection, cancellationToken).ConfigureAwait(false);
+        if (_initialized)
+        {
+            return;
+        }
+
+        await _initializationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_initialized)
+            {
+                return;
+            }
+
+            _layout.EnsureDirectories();
+            await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+            if (!await SqliteSchema.IsCurrentAsync(connection, cancellationToken).ConfigureAwait(false))
+            {
+                await SqliteSchema.InitializeAsync(connection, cancellationToken).ConfigureAwait(false);
+            }
+            _initialized = true;
+        }
+        finally
+        {
+            _initializationGate.Release();
+        }
     }
 
     public async Task<StateSnapshot?> ReadAsync(StateKey key, CancellationToken cancellationToken = default)
@@ -253,7 +278,14 @@ public sealed partial class SqliteStateStore : IStateStore
 
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT project_id,operation_type,request_fingerprint,status,generation,entity_kind,entity_id,created_at,completed_at,result_json FROM operations WHERE operation_id=$id;";
+        command.CommandText = """
+            SELECT project_id,operation_type,request_fingerprint,status,generation,entity_kind,entity_id,created_at,completed_at,result_json
+            FROM operations WHERE operation_id=$id
+            UNION ALL
+            SELECT project_id,operation_type,request_fingerprint,status,generation,entity_kind,entity_id,created_at,completed_at,result_json
+            FROM archived_operations WHERE operation_id=$id
+            LIMIT 1;
+            """;
         command.Parameters.AddWithValue("$id", operationId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -278,6 +310,7 @@ public sealed partial class SqliteStateStore : IStateStore
     public async Task<long> AppendEventAsync(EngineeringEvent engineeringEvent, CancellationToken cancellationToken = default)
     {
         SqliteMapping.ValidateJson(engineeringEvent.PayloadJson, nameof(engineeringEvent.PayloadJson));
+        StoragePayloadPolicy.EnsureArchiveSafe(engineeringEvent.PayloadJson);
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = connection.BeginTransaction(deferred: false);
         var existing = await ReadEventAsync(connection, transaction, engineeringEvent.EventId, cancellationToken).ConfigureAwait(false);
@@ -291,6 +324,17 @@ public sealed partial class SqliteStateStore : IStateStore
 
             await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
             return existing.Generation;
+        }
+        var archived = await ReadArchivedEventFingerprintAsync(connection, transaction, engineeringEvent.EventId, cancellationToken).ConfigureAwait(false);
+        if (archived is not null)
+        {
+            if (!string.Equals(archived.Value.Fingerprint, EventFingerprint(engineeringEvent), StringComparison.Ordinal))
+            {
+                await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+                throw new InvalidOperationException("Archived Event ID is already bound to different facts");
+            }
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return archived.Value.Generation;
         }
 
         await InsertEventAsync(connection, transaction, engineeringEvent, cancellationToken).ConfigureAwait(false);
@@ -356,12 +400,16 @@ public sealed partial class SqliteStateStore : IStateStore
         if (limit is < 1 or > 4096) throw new ArgumentOutOfRangeException(nameof(limit));
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        var direction = outgoing ? "from_kind = $kind AND from_id = $entity" : "to_kind = $kind AND to_id = $entity";
+        var direction = outgoing ? "edge.from_kind = $kind AND edge.from_id = $entity" : "edge.to_kind = $kind AND edge.to_id = $entity";
         command.CommandText = $"""
-            SELECT project_id, from_kind, from_id, to_kind, to_id, relation, fingerprint, lifecycle
-            FROM dependency_edges
-            WHERE project_id = $project AND {direction} AND lifecycle = 'VALID'
-            ORDER BY relation, from_kind, from_id, to_kind, to_id
+            SELECT edge.project_id, edge.from_kind, edge.from_id, edge.to_kind, edge.to_id, edge.relation, edge.fingerprint, edge.lifecycle
+            FROM dependency_edges edge
+            LEFT JOIN entities source ON source.project_id=edge.project_id AND source.kind=edge.from_kind AND source.entity_id=edge.from_id
+            LEFT JOIN entities target ON target.project_id=edge.project_id AND target.kind=edge.to_kind AND target.entity_id=edge.to_id
+            WHERE edge.project_id = $project AND {direction} AND edge.lifecycle = 'VALID'
+              AND (source.entity_id IS NULL OR source.lifecycle='VALID')
+              AND (target.entity_id IS NULL OR target.lifecycle='VALID')
+            ORDER BY edge.relation, edge.from_kind, edge.from_id, edge.to_kind, edge.to_id
             LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$project", key.ProjectId);
@@ -412,6 +460,8 @@ public sealed partial class SqliteStateStore : IStateStore
         _ = request.Mutation.Key.Normalize();
         SqliteMapping.ValidateJson(request.Mutation.PayloadJson, nameof(request.Mutation.PayloadJson));
         SqliteMapping.ValidateJson(request.EventPayloadJson, nameof(request.EventPayloadJson));
+        StoragePayloadPolicy.EnsureArchiveSafe(request.Mutation.PayloadJson);
+        StoragePayloadPolicy.EnsureArchiveSafe(request.EventPayloadJson);
         if (request.DependencyChanges is not null)
         {
             foreach (var edge in request.DependencyChanges)
@@ -443,9 +493,11 @@ public sealed partial class SqliteStateStore : IStateStore
         foreach (var mutation in request.Mutations)
         {
             SqliteMapping.ValidateJson(mutation.PayloadJson, nameof(request.Mutations));
+            StoragePayloadPolicy.EnsureArchiveSafe(mutation.PayloadJson);
         }
 
         SqliteMapping.ValidateJson(request.EventPayloadJson, nameof(request.EventPayloadJson));
+        StoragePayloadPolicy.EnsureArchiveSafe(request.EventPayloadJson);
         if (request.DependencyChanges is not null)
         {
             foreach (var edge in request.DependencyChanges)
@@ -535,5 +587,9 @@ public sealed partial class SqliteStateStore : IStateStore
         edge.Fingerprint.Trim(),
         edge.Lifecycle);
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync()
+    {
+        _initializationGate.Dispose();
+        return ValueTask.CompletedTask;
+    }
 }

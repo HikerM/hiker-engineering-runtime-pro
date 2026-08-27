@@ -44,8 +44,13 @@ public sealed class ProjectBootstrapService(
             ? null
             : new StateKey(suppliedProjectId, EntityKinds.Project, IdentityEntityId).Normalize().ProjectId;
         var identity = await store.InspectProjectIdentityAsync(cancellationToken).ConfigureAwait(false);
+        if (identity.DatabaseExists && identity.DatabaseHealthy)
+        {
+            await store.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        }
         var inspectLegacyContents = identity.DatabaseHealthy &&
-                                    (intent is ProjectBootstrapIntent.Initialize or ProjectBootstrapIntent.MigrateCommunity or ProjectBootstrapIntent.Recovery ||
+                                    (intent is ProjectBootstrapIntent.Initialize or ProjectBootstrapIntent.Recovery ||
+                                     intent == ProjectBootstrapIntent.MigrateCommunity && identity.CompletedCommunityImportProjectIds.Count == 0 ||
                                      identity.ActiveIdentityRecords.Count == 0 && identity.CompletedCommunityImportProjectIds.Count == 0);
         var content = InspectAiContent(inspectLegacyContents);
         if (!identity.DatabaseHealthy)
