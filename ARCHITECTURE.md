@@ -26,6 +26,8 @@ Hiker 5.19 Pro 是本地编译的长期自主软件工程运行时。它不替�
 
 Legacy 迁移边界：`COMMUNITY_5_18_IMPORT` authority 表示只读历史事实，不是活动 Runtime authority。Community aggregate Ownership 与 Task Map 以 `Incompatible` 生命周期保留；既有 rc.1 数据即使仍为 `Valid`，Runtime Codec 也会拒绝将其解释为活动 Writer、Lease 或 Worktree。只有 `RUNTIME_COORDINATOR` 生成且通过必填字段验证的状态可参与当前运行时协调。
 
+Legacy Finalize 边界：已完成迁移的已知 schema 2.0.0 运行控制事实必须通过显式 `finalize-legacy` 完成收尾。命令先备份，再用单事务转为 `Archived`，保留原始内容与来源且不创建替代运行态；未知格式继续阻断。Doctor 只忽略已经 Finalize 的 Archived Legacy 控制态。
+
 Project Identity 边界：`.ai/state/hiker-state.db` 中由 `PROJECT_BOOTSTRAP` 写入的唯一 Project Identity 是逻辑项目权威；路径、盘符、目录名、Git branch 与 Worktree 仅是 Workspace Fact。所有项目级命令复用同一 Bootstrap/Preflight，Move 保留 Identity，Fork 必须显式创建新 Identity，损坏或冲突状态默认阻断且不得静默重建。
 
 Windows 发行边界：`win-x64` 使用目录式 self-contained payload，完整携带 .NET Runtime 与托管依赖。目标机不依赖机器级 .NET；发布与安装必须保留整个 payload，不能只复制 `hiker.exe`。

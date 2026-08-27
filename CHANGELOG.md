@@ -1,6 +1,23 @@
 # Changelog
 
-## 5.19.0-rc.3 — Unreleased
+## 5.19.0-rc.4 — Unreleased
+
+### Added
+
+- `GA-5.19-LEGACY-FINALIZE-001`：新增 `hiker finalize-legacy`，对已完成 Community 迁移的项目自动解析原 Project ID、创建 State Backup 并单事务历史化 Legacy Runtime 控制态。
+- 已知 `COMMUNITY_5_18_IMPORT / 2.0.0` Task、TaskDependency、Checkpoint、Ownership、Worktree、RuntimeLease、ResourceLease 与 Agent 统一转为 `Archived`；原 payload、authority、schema、source/dependency fingerprint 保持不变。
+- Finalize 完成后立即运行 Doctor；首次返回 `FINALIZED`，重试返回 `ALREADY_FINALIZED` 且不增加 generation、event 或 backup。
+
+### Safety
+
+- Finalize 不生成 TaskId、WriterRuntimeId、WorktreeId、Lease、Agent 或 Process，不创建任何新的 Active Runtime 状态。
+- 未完成 migration marker、未知 schema 和 Corrupt Legacy Runtime 事实保持 `REQUIRES_REVIEW`，不会被静默归档。
+
+### Verification
+
+- 当前私有源码完整 Unit / Integration：101/101 PASS；新增阻断前 Doctor、单事务 Finalize、原始事实保留、非运行态 Evidence 保留、恢复备份、未知 schema 拒绝、CLI 健康闭环及重试不增 generation 测试。
+
+## 5.19.0-rc.3 — 2026-08-27
 
 ### Added
 

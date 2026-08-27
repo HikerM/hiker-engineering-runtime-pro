@@ -123,6 +123,11 @@ public sealed class StateCoordinator
     public Task<ProjectForkResult> ForkProjectAsync(ProjectForkRequest request, CancellationToken cancellationToken = default) =>
         WithWriterAsync(token => _store.ForkProjectAsync(request, token), cancellationToken);
 
+    public Task<LegacyRuntimeFinalizeResult> FinalizeLegacyRuntimeStateAsync(
+        LegacyRuntimeFinalizeRequest request,
+        CancellationToken cancellationToken = default) =>
+        WithWriterAsync(token => _store.FinalizeLegacyRuntimeAsync(request, token), cancellationToken);
+
     public Task<RepairReport> RepairAsync(CancellationToken cancellationToken = default) =>
         WithWriterAsync(token => _store.RepairAsync(token), cancellationToken);
 

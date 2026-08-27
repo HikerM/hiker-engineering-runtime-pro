@@ -260,6 +260,12 @@ public sealed class Field519001LegacyMigrationTests
             var projectDoctor = await RunCliAsync(root, "doctor", "--project-id", ProjectId);
             var projectStatus = await RunCliAsync(root, "status", "--project-id", ProjectId);
             var retry = await RunCliAsync(root, "migrate-community", "--project-id", ProjectId);
+            var finalize = await RunCliAsync(root, "finalize-legacy");
+            var healthyDoctor = await RunCliAsync(root, "doctor");
+            var healthyStatus = await RunCliAsync(root, "status");
+            var beforeFinalizeRetry = Json(healthyStatus.Output).GetProperty("metrics").GetProperty("generation").GetInt64();
+            var finalizeRetry = await RunCliAsync(root, "finalize-legacy");
+            var afterFinalizeRetry = await RunCliAsync(root, "status");
 
             Assert.Equal(0, firstImport.ExitCode);
             Assert.Equal("IMPORTED", Json(firstImport.Output).GetProperty("import").GetProperty("status").GetString());
@@ -275,6 +281,17 @@ public sealed class Field519001LegacyMigrationTests
             Assert.Equal("BLOCKED", Json(projectStatus.Output).GetProperty("health").GetProperty("status").GetString());
             Assert.Equal(0, retry.ExitCode);
             Assert.Equal("ALREADY_IMPORTED", Json(retry.Output).GetProperty("import").GetProperty("status").GetString());
+            Assert.Equal(0, finalize.ExitCode);
+            Assert.Equal("FINALIZED", Json(finalize.Output).GetProperty("status").GetString());
+            Assert.Equal("HEALTHY", Json(finalize.Output).GetProperty("health").GetProperty("status").GetString());
+            Assert.Equal(0, healthyDoctor.ExitCode);
+            Assert.Equal("HEALTHY", Json(healthyDoctor.Output).GetProperty("status").GetString());
+            Assert.Equal(0, healthyStatus.ExitCode);
+            Assert.True(Json(healthyStatus.Output).GetProperty("ok").GetBoolean());
+            Assert.Equal("ACTIVE_EXISTING_PROJECT", Json(healthyStatus.Output).GetProperty("project").GetProperty("state").GetString());
+            Assert.Equal(0, finalizeRetry.ExitCode);
+            Assert.Equal("ALREADY_FINALIZED", Json(finalizeRetry.Output).GetProperty("status").GetString());
+            Assert.Equal(beforeFinalizeRetry, Json(afterFinalizeRetry.Output).GetProperty("metrics").GetProperty("generation").GetInt64());
             Assert.DoesNotContain("ArgumentNullException", string.Concat(projectDoctor.Output, projectDoctor.Error, projectStatus.Output, projectStatus.Error), StringComparison.Ordinal);
         }
         finally

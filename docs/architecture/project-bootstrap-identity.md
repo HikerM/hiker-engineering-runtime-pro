@@ -8,7 +8,7 @@ Community 5.18 已完成导入、但尚无正式 Identity 实体的数据库，�
 
 ## Unified Preflight
 
-`init`、`migrate-community`、`doctor`、`status`、`resume`、`backup`、`export` 与 Runtime Start 使用同一 Project Preflight。状态模型覆盖：
+`init`、`migrate-community`、`finalize-legacy`、`doctor`、`status`、`resume`、`backup`、`export` 与 Runtime Start 使用同一 Project Preflight。状态模型覆盖：
 
 - `NEW_PROJECT`、`LEGACY_PROJECT`、`ACTIVE_EXISTING_PROJECT`、`MIXED_LEGACY_PROJECT`；
 - `IDENTITY_MISSING`、`IDENTITY_CONFLICT`、`IDENTITY_MISMATCH`；
@@ -22,6 +22,8 @@ Community 5.18 已完成导入、但尚无正式 Identity 实体的数据库，�
 Legacy source 只从固定白名单导入。每个事实保存来源哈希，完成后写 migration marker；原文件保持原位且只作为只读来源。中断后，没有 marker 的已导入事实被识别为 `MIGRATION_INCOMPLETE`，重试复用原 operation ID 和原 Project ID，不重复导入已提交事实。
 
 `.ai` 内容按权威状态、可迁移 Legacy、冷归档、可重建 Cache、临时项和未知项分类。未知顶层内容需要人工复核；任何路径都不默认删除或重建 `.ai`。
+
+迁移完成不等于旧运行现场可继续使用。显式 `hiker finalize-legacy` 在确认唯一 Project ID 与完整 migration marker 后先创建 State Backup，再由 `StateCoordinator` 触发单个 SQLite 事务，将 `COMMUNITY_5_18_IMPORT / 2.0.0` 的 Task、TaskDependency、Checkpoint、Ownership、Worktree、RuntimeLease、ResourceLease 和 Agent 转为 `Archived`。事务只更新 lifecycle、retention、generation 与 updated_at，原 payload、authority、schema 和 fingerprint 不变；Requirement、Decision、Knowledge 和 Evidence 不在写范围内。未知 schema 或 Corrupt 事实继续 `REQUIRES_REVIEW`。
 
 ## Move and Fork
 

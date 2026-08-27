@@ -108,6 +108,32 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
                     Write(new { import = result.Import, project = result, pre_import_backup = backup });
                     return result.Status is "IMPORTED" or "ALREADY_IMPORTED" or "REUSED" ? 0 : 2;
                 }
+            case "finalize-legacy":
+                {
+                    var result = await new LegacyRuntimeFinalizationService(
+                        layout,
+                        store,
+                        state,
+                        bootstrap,
+                        new ProcessIdentityProbe()).FinalizeAsync(suppliedProjectId).ConfigureAwait(false);
+                    var project = await bootstrap.PreflightAsync(ProjectBootstrapIntent.Read, suppliedProjectId).ConfigureAwait(false);
+                    var ok = result.Status is "FINALIZED" or "ALREADY_FINALIZED" &&
+                             result.Health.Status == "HEALTHY" &&
+                             project.CanProceed;
+                    Write(new
+                    {
+                        ok,
+                        result.Status,
+                        result.ProjectId,
+                        result.ReasonCode,
+                        result.Inspection,
+                        result.Backup,
+                        result.Finalization,
+                        result.Health,
+                        project
+                    });
+                    return ok ? 0 : 2;
+                }
             case "fork":
                 {
                     var targetProjectId = suppliedProjectId ?? throw new ArgumentException("fork requires --project-id <new stable id>");

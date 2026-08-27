@@ -40,7 +40,8 @@ public sealed class ReleaseVersionTests
             ".MigrateAsync(",
             ".RepairAsync(",
             ".GarbageCollectAsync(",
-            ".RegisterArtifactAsync("
+            ".RegisterArtifactAsync(",
+            ".FinalizeLegacyRuntimeAsync("
         };
         var bypasses = Directory.EnumerateFiles(runtime, "*.cs", SearchOption.AllDirectories)
             .Where(path => !path.StartsWith(stateDirectory, StringComparison.OrdinalIgnoreCase))

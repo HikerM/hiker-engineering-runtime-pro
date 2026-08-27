@@ -30,6 +30,12 @@ public interface IStateStore : IAsyncDisposable
     Task<StoreMetrics> GetMetricsAsync(CancellationToken cancellationToken = default);
     Task<ProjectIdentityInventory> InspectProjectIdentityAsync(CancellationToken cancellationToken = default);
     Task<ProjectForkResult> ForkProjectAsync(ProjectForkRequest request, CancellationToken cancellationToken = default);
+    Task<LegacyRuntimeInspection> InspectLegacyRuntimeAsync(
+        string projectId,
+        CancellationToken cancellationToken = default);
+    Task<LegacyRuntimeFinalizeResult> FinalizeLegacyRuntimeAsync(
+        LegacyRuntimeFinalizeRequest request,
+        CancellationToken cancellationToken = default);
     Task<StateExportResult> ExportAsync(
         string projectId,
         string? outputPath = null,

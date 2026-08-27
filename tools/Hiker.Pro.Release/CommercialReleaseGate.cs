@@ -30,6 +30,7 @@ internal sealed class CommercialReleaseGate
         "Init_GeneratesIdentityOnceAndRepeatedInitReusesIt",
         "ImportedLegacyNamespace_ResolvesSameIdentityWithoutReadSideWrite",
         "ExplicitFork_CreatesNewIdentityInheritsFactsAndResetsOperationalState",
+        "CompletedLegacyMigration_FinalizesRuntimeFactsAtomicallyAndIdempotently",
         "SelfContainedWinX64Publish_RunsWithoutMachineDotnet",
         "ReleaseBuilderAndVerifier_RequireSelfContainedRuntime"
     };

@@ -14,6 +14,28 @@ public sealed class AdvancedDoctor(
     {
         var baseHealth = await stateStore.HealthCheckAsync(cancellationToken).ConfigureAwait(false);
         var findings = baseHealth.Findings.ToList();
+        var legacyRuntime = await stateStore.InspectLegacyRuntimeAsync(projectId, cancellationToken).ConfigureAwait(false);
+        foreach (var fact in legacyRuntime.FinalizableFacts.Concat(legacyRuntime.ReviewFacts))
+        {
+            findings.Add(new HealthFinding(
+                "LEGACY_IMPORTED_STATE_REQUIRES_REVIEW",
+                "BLOCKED",
+                fact.EntityId,
+                $"{fact.Kind} authority={LegacyRuntimeFinalizationFacts.Authority} schema={fact.SchemaVersion} lifecycle={fact.Lifecycle}",
+                false));
+        }
+        var unlisted = legacyRuntime.Finalizable + legacyRuntime.RequiresReview -
+                       legacyRuntime.FinalizableFacts.Count - legacyRuntime.ReviewFacts.Count;
+        if (unlisted > 0)
+        {
+            findings.Add(new HealthFinding(
+                "LEGACY_IMPORTED_STATE_REQUIRES_REVIEW",
+                "BLOCKED",
+                projectId,
+                $"{unlisted} additional legacy runtime facts require finalize or review",
+                false));
+        }
+
         var leases = await stateStore.ReadAsync(projectId, EntityKinds.RuntimeLease, StateLifecycle.Valid, 1000, cancellationToken).ConfigureAwait(false);
         await CheckProjectAsync(projectId, leases, findings, cancellationToken).ConfigureAwait(false);
         return findings.Count == 0
@@ -38,6 +60,11 @@ public sealed class AdvancedDoctor(
 
         foreach (var leaseState in leases)
         {
+            if (RuntimeStateCodec.IsLegacyImportedFact(leaseState))
+            {
+                continue;
+            }
+
             RuntimeLease lease;
             try
             {
@@ -86,12 +113,6 @@ public sealed class AdvancedDoctor(
         {
             if (RuntimeStateCodec.IsLegacyImportedFact(snapshot))
             {
-                findings.Add(new HealthFinding(
-                    "LEGACY_IMPORTED_STATE_REQUIRES_REVIEW",
-                    "BLOCKED",
-                    snapshot.Key.EntityId,
-                    $"{snapshot.Key.Kind} authority={snapshot.Authority} schema={snapshot.SchemaVersion} lifecycle={snapshot.Lifecycle}",
-                    false));
                 continue;
             }
 

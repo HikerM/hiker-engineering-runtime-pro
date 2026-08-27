@@ -17,7 +17,7 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 
 | 项目 | 当前值 |
 | --- | --- |
-| Pro 产品版本 | `5.19.0-rc.3` |
+| Pro 产品版本 | `5.19.0-rc.4` |
 | Runtime 版本 | `0.1.0` |
 | State Schema | `3.0.0` |
 | Runtime | .NET 9；`win-x64` 发行包自包含 Runtime，目标机无需预装 .NET |
@@ -58,7 +58,7 @@ Context Resolver、`hiker resume`、结构化 Decision Memory、Intent/Dependenc
 
 这些结果分别属于 `DETERMINISTIC_VERIFIED`、`SIMULATION_PROVEN` 或 `REAL_INTEGRATION_PROVEN`；不等于客户现场长期运行。当前是发布候选，最终状态只由同一提交生成的商业 Gate 决定。
 
-Community 5.18 导入的 aggregate Ownership / Task Map 仅作为 `LEGACY_IMPORTED_FACT` 保留，不会被激活为 5.19 Runtime Writer 或 Worktree。项目级 `doctor/status` 会对不兼容 Legacy 状态返回结构化 Finding，而不是因缺失运行时标识符而崩溃。
+Community 5.18 导入的运行控制事实不会被激活为 5.19 Runtime Writer、Lease、Agent 或 Worktree。完成迁移后，`hiker finalize-legacy` 会先创建可验证备份，再用单个 SQLite 事务将已知 schema 2.0.0 的旧 Task/Checkpoint/Ownership/Worktree/Lease/Agent 事实转为只读 `Archived`；payload、authority、schema 与 fingerprint 保持不变，未知格式仍然阻断并要求复核。
 
 ## 当前验证结果
 
@@ -66,7 +66,7 @@ Community 5.18 导入的 aggregate Ownership / Task Map 仅作为 `LEGACY_IMPORT
 
 | 验证面 | 结果 | 证据等级 |
 | --- | --- | --- |
-| Unit / Integration | 当前源码 98/98 PASS（含 `FIELD-5.19-001`、Project Identity/Bootstrap 与无全局 .NET 自包含执行回归）；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
+| Unit / Integration | 当前源码 101/101 PASS（含 `FIELD-5.19-001`、Project Identity/Bootstrap、Legacy Finalize 与无全局 .NET 自包含执行回归）；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
 | Community 5.18 回归 | 五插件合计 297/297 PASS，公开工作区保持干净 | `DETERMINISTIC_VERIFIED` |
 | 加速老化 | 12 个合成月份、1201 Task、120 Goal Revision、120 Handoff、60 Crash | `SIMULATION_PROVEN` |
 | 并发写入 | 1/2/4/8 Worker 均恰好一个 CAS 成功；Runtime Worker 结果需由当前提交重跑确认 | `SIMULATION_PROVEN` |
@@ -94,9 +94,10 @@ hiker resume --root <project> --goal-id <goal-id>
 hiker backup --root <project>
 hiker export --root <project>
 hiker migrate-community --root <project>
+hiker finalize-legacy --root <project>
 ```
 
-`init/status/doctor/resume/backup/export/migrate-community` 经过同一个 Project Preflight。`--project-id` 只用于恢复、CI 和显式 Fork 等高级场景；已有项目会从唯一权威状态自动解析原 ID，身份冲突或损坏状态会阻断而不会生成第二个 UUID。显式 Fork 必须提供新的稳定 ID，并在原子事务中继承可复用事实、清除运行中 Task/Lease/Ownership/Worktree 绑定：
+`init/status/doctor/resume/backup/export/migrate-community/finalize-legacy` 经过同一个 Project Preflight。`finalize-legacy` 只接受迁移 marker 已完成且 Project ID 唯一的项目；第一次返回 `FINALIZED`，再次运行返回 `ALREADY_FINALIZED` 且不增加 generation。`--project-id` 只用于恢复、CI 和显式 Fork 等高级场景；已有项目会从唯一权威状态自动解析原 ID，身份冲突或损坏状态会阻断而不会生成第二个 UUID。显式 Fork 必须提供新的稳定 ID，并在原子事务中继承可复用事实、清除运行中 Task/Lease/Ownership/Worktree 绑定：
 
 ```powershell
 hiker fork --root <copied-project> --project-id <new-stable-id>
