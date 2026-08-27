@@ -336,14 +336,24 @@ public sealed partial class SqliteStateStore : IStateStore
         value.PayloadJson,
         value.OccurredAt.ToUniversalTime().ToString("O")));
 
-    public async Task<IReadOnlyList<DependencyEdge>> QueryDependenciesAsync(
+    public Task<IReadOnlyList<DependencyEdge>> QueryDependenciesAsync(
         string projectId,
         string kind,
         string entityId,
         bool outgoing,
+        CancellationToken cancellationToken = default) =>
+        QueryDependenciesBoundedAsync(projectId, kind, entityId, outgoing, 4096, cancellationToken);
+
+    public async Task<IReadOnlyList<DependencyEdge>> QueryDependenciesBoundedAsync(
+        string projectId,
+        string kind,
+        string entityId,
+        bool outgoing,
+        int limit,
         CancellationToken cancellationToken = default)
     {
         var key = new StateKey(projectId, kind, entityId).Normalize();
+        if (limit is < 1 or > 4096) throw new ArgumentOutOfRangeException(nameof(limit));
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         var direction = outgoing ? "from_kind = $kind AND from_id = $entity" : "to_kind = $kind AND to_id = $entity";
@@ -351,11 +361,13 @@ public sealed partial class SqliteStateStore : IStateStore
             SELECT project_id, from_kind, from_id, to_kind, to_id, relation, fingerprint, lifecycle
             FROM dependency_edges
             WHERE project_id = $project AND {direction} AND lifecycle = 'VALID'
-            ORDER BY relation, from_kind, from_id, to_kind, to_id;
+            ORDER BY relation, from_kind, from_id, to_kind, to_id
+            LIMIT $limit;
             """;
         command.Parameters.AddWithValue("$project", key.ProjectId);
         command.Parameters.AddWithValue("$kind", key.Kind);
         command.Parameters.AddWithValue("$entity", key.EntityId);
+        command.Parameters.AddWithValue("$limit", limit);
         var edges = new List<DependencyEdge>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))

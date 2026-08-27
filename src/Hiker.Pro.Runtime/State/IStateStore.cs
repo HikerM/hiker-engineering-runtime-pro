@@ -22,6 +22,13 @@ public interface IStateStore : IAsyncDisposable
         string entityId,
         bool outgoing,
         CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DependencyEdge>> QueryDependenciesBoundedAsync(
+        string projectId,
+        string kind,
+        string entityId,
+        bool outgoing,
+        int limit,
+        CancellationToken cancellationToken = default);
     Task<MaterializationResult> MaterializeAsync(MaterializationRequest request, CancellationToken cancellationToken = default);
     Task<MigrationResult> MigrateAsync(string targetVersion, CancellationToken cancellationToken = default);
     Task<HealthReport> HealthCheckAsync(CancellationToken cancellationToken = default);

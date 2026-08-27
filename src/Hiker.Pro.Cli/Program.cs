@@ -11,7 +11,7 @@ var options = new JsonSerializerOptions
 
 if (args.Length == 0 || args[0] is "help" or "--help" or "-h")
 {
-    Console.WriteLine("hiker <init|doctor|status|resume|version|backup|restore|export|migrate-community|finalize-legacy|fork> [--root <project>] [--project-id <advanced/recovery>]");
+    Console.WriteLine("hiker <attach|checkpoint|resume|init|doctor|status|version|backup|restore|export|migrate-community|finalize-legacy|fork> [--root <project>] [--project-id <advanced/recovery>]");
     return 0;
 }
 

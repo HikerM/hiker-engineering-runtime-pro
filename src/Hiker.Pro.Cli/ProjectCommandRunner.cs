@@ -64,13 +64,128 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
                     Write(new { project_id = active.ProjectId, backup });
                     return 0;
                 }
+            case "attach":
+                {
+                    var providerSession = ResolveProviderSession(args);
+                    var boundaryProof = ValueAfter(args, "--boundary-proof") ??
+                        Environment.GetEnvironmentVariable("HIKER_SAFE_BOUNDARY") ??
+                        throw new ArgumentException("attach requires a host-confirmed safe boundary");
+                    var adoption = await new LiveSessionAdoptionService(
+                        layout,
+                        store,
+                        state,
+                        bootstrap,
+                        new ProcessIdentityProbe()).AdoptAsync(new LiveAdoptionRequest(
+                            providerSession.Provider,
+                            providerSession.SessionId,
+                            boundaryProof,
+                            ValueAfter(args, "--goal-id"),
+                            ValueAfter(args, "--task-id"))).ConfigureAwait(false);
+                    Write(new
+                    {
+                        ok = adoption.Status is LiveAdoptionStatuses.Adopted or LiveAdoptionStatuses.AlreadyAdopted,
+                        adoption.Status,
+                        adoption.ProjectId,
+                        adoption.GoalId,
+                        adoption.TaskId,
+                        adoption.CheckpointId,
+                        adoption.Provider,
+                        adoption.ProviderSessionFingerprint,
+                        adoption.Committed,
+                        adoption.Idempotent,
+                        adoption.NextAction,
+                        adoption.StateReads,
+                        adoption.StateWrites,
+                        adoption.ContextBytes,
+                        context_fingerprint = adoption.Context?.Fingerprint,
+                        adoption.Reasons,
+                        project = adoption.Project
+                    });
+                    return adoption.Status is LiveAdoptionStatuses.Adopted or LiveAdoptionStatuses.AlreadyAdopted ? 0 : 2;
+                }
+            case "checkpoint":
+                {
+                    var providerSession = ResolveProviderSession(args);
+                    var checkpoint = await new LiveTurnLifecycleService(
+                        store,
+                        state,
+                        bootstrap).CheckpointAsync(new LiveTurnCheckpointRequest(
+                            providerSession.Provider,
+                            providerSession.SessionId,
+                            ValueAfter(args, "--outcome") ?? "TURN_TERMINAL",
+                            ValuesAfter(args, "--changed-surface"),
+                            ValuesAfter(args, "--evidence-ref"),
+                            ValuesAfter(args, "--test-ref"))).ConfigureAwait(false);
+                    Write(new
+                    {
+                        ok = checkpoint.Status is LiveTurnCheckpointStatuses.Checkpointed or LiveTurnCheckpointStatuses.AlreadyCheckpointed,
+                        checkpoint.Status,
+                        checkpoint.ProjectId,
+                        checkpoint.GoalId,
+                        checkpoint.TaskId,
+                        checkpoint.CheckpointId,
+                        checkpoint.ProviderSessionFingerprint,
+                        checkpoint.Committed,
+                        checkpoint.Idempotent,
+                        checkpoint.OwnershipReleased,
+                        checkpoint.StateReads,
+                        checkpoint.StateWrites,
+                        checkpoint.ContextBytes,
+                        checkpoint.ContextFingerprint,
+                        checkpoint.Reasons
+                    });
+                    return checkpoint.Status is LiveTurnCheckpointStatuses.Checkpointed or LiveTurnCheckpointStatuses.AlreadyCheckpointed ? 0 : 2;
+                }
             case "resume":
                 {
-                    var active = await bootstrap.RequireActiveAsync(ProjectBootstrapIntent.Read, suppliedProjectId).ConfigureAwait(false);
-                    var goal = ValueAfter(args, "--goal-id") ?? throw new ArgumentException("resume requires --goal-id <current goal id>");
-                    var resume = await new ProjectResumeService(store).ResumeAsync(active.ProjectId!, goal).ConfigureAwait(false);
-                    Write(new { project = active, resume });
-                    return 0;
+                    var goal = ValueAfter(args, "--goal-id");
+                    if (goal is not null && ValueAfter(args, "--provider-session-id") is null &&
+                        Environment.GetEnvironmentVariable("HIKER_PROVIDER_SESSION_ID") is null &&
+                        Environment.GetEnvironmentVariable("CODEX_THREAD_ID") is null &&
+                        Environment.GetEnvironmentVariable("CODEX_SESSION_ID") is null)
+                    {
+                        var active = await bootstrap.RequireActiveAsync(ProjectBootstrapIntent.Read, suppliedProjectId).ConfigureAwait(false);
+                        var resume = await new ProjectResumeService(store).ResumeAsync(active.ProjectId!, goal).ConfigureAwait(false);
+                        Write(new { project = active, resume });
+                        return 0;
+                    }
+
+                    var providerSession = ResolveProviderSession(args);
+                    var boundaryProof = ValueAfter(args, "--boundary-proof") ??
+                        Environment.GetEnvironmentVariable("HIKER_SAFE_BOUNDARY") ??
+                        throw new ArgumentException("resume requires a host-confirmed safe boundary");
+                    var adoption = await new LiveSessionAdoptionService(
+                        layout,
+                        store,
+                        state,
+                        bootstrap,
+                        new ProcessIdentityProbe()).AdoptAsync(new LiveAdoptionRequest(
+                            providerSession.Provider,
+                            providerSession.SessionId,
+                            boundaryProof,
+                            goal,
+                            ValueAfter(args, "--task-id"))).ConfigureAwait(false);
+                    Write(new
+                    {
+                        ok = adoption.Status is LiveAdoptionStatuses.Adopted or LiveAdoptionStatuses.AlreadyAdopted,
+                        adoption.Status,
+                        adoption.ProjectId,
+                        adoption.GoalId,
+                        adoption.TaskId,
+                        adoption.CheckpointId,
+                        adoption.Provider,
+                        adoption.ProviderSessionFingerprint,
+                        adoption.Committed,
+                        adoption.Idempotent,
+                        adoption.NextAction,
+                        adoption.StateReads,
+                        adoption.StateWrites,
+                        adoption.ContextBytes,
+                        context_fingerprint = adoption.Context?.Fingerprint,
+                        adoption.Reasons,
+                        project = adoption.Project
+                    });
+                    return adoption.Status is LiveAdoptionStatuses.Adopted or LiveAdoptionStatuses.AlreadyAdopted ? 0 : 2;
                 }
             case "restore":
                 {
@@ -155,9 +270,45 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
         return index >= 0 && index + 1 < values.Length ? values[index + 1] : null;
     }
 
+    private static IReadOnlyList<string> ValuesAfter(string[] values, string name)
+    {
+        var result = new List<string>();
+        for (var index = 0; index < values.Length - 1; index++)
+        {
+            if (string.Equals(values[index], name, StringComparison.Ordinal))
+            {
+                result.Add(values[index + 1]);
+                index++;
+            }
+        }
+
+        return result;
+    }
+
+    private static ProviderSession ResolveProviderSession(string[] args)
+    {
+        var explicitProvider = ValueAfter(args, "--provider") ?? Environment.GetEnvironmentVariable("HIKER_PROVIDER");
+        var explicitSession = ValueAfter(args, "--provider-session-id") ?? Environment.GetEnvironmentVariable("HIKER_PROVIDER_SESSION_ID");
+        if (!string.IsNullOrWhiteSpace(explicitSession))
+        {
+            return new ProviderSession(explicitProvider ?? "external", explicitSession);
+        }
+
+        var codexSession = Environment.GetEnvironmentVariable("CODEX_THREAD_ID") ??
+            Environment.GetEnvironmentVariable("CODEX_SESSION_ID");
+        if (!string.IsNullOrWhiteSpace(codexSession))
+        {
+            return new ProviderSession("codex", codexSession);
+        }
+
+        throw new ArgumentException("No provider session identity is available from the host environment");
+    }
+
     private static async Task<string> FileSha256Async(string path)
     {
         await using var stream = new FileStream(Path.GetFullPath(path), FileMode.Open, FileAccess.Read, FileShare.Read, 131072, FileOptions.Asynchronous | FileOptions.SequentialScan);
         return Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream).ConfigureAwait(false)).ToLowerInvariant();
     }
+
+    private sealed record ProviderSession(string Provider, string SessionId);
 }

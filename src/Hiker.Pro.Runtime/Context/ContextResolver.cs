@@ -18,7 +18,13 @@ public sealed class ContextResolver(IStateStore stateStore, TimeProvider? timePr
         await AddExactAsync(new StateKey(request.ProjectId, EntityKinds.Goal, request.GoalId), ContextTemperature.Hot).ConfigureAwait(false);
         await AddExactAsync(new StateKey(request.ProjectId, EntityKinds.Task, request.TaskId), ContextTemperature.Hot).ConfigureAwait(false);
 
-        var outgoing = await stateStore.QueryDependenciesAsync(request.ProjectId, EntityKinds.Task, request.TaskId, outgoing: true, cancellationToken).ConfigureAwait(false);
+        var outgoing = await stateStore.QueryDependenciesBoundedAsync(
+            request.ProjectId,
+            EntityKinds.Task,
+            request.TaskId,
+            outgoing: true,
+            limit: 257,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
         reads++;
         foreach (var edge in outgoing.Take(256))
         {

@@ -49,6 +49,15 @@ public sealed class StateCoordinator
         CancellationToken cancellationToken = default) =>
         _store.QueryDependenciesAsync(projectId, kind, entityId, outgoing, cancellationToken);
 
+    public Task<IReadOnlyList<DependencyEdge>> QueryDependenciesBoundedAsync(
+        string projectId,
+        string kind,
+        string entityId,
+        bool outgoing,
+        int limit,
+        CancellationToken cancellationToken = default) =>
+        _store.QueryDependenciesBoundedAsync(projectId, kind, entityId, outgoing, limit, cancellationToken);
+
     public Task<HealthReport> HealthCheckAsync(CancellationToken cancellationToken = default) =>
         _store.HealthCheckAsync(cancellationToken);
 

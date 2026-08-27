@@ -17,7 +17,7 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 
 | 项目 | 当前值 |
 | --- | --- |
-| Pro 产品版本 | `5.19.0-rc.6` |
+| Pro 产品版本 | `5.19.0-rc.7` |
 | Runtime 版本 | `0.1.0` |
 | State Schema | `3.0.0` |
 | Runtime | .NET 9；`win-x64` 发行包自包含 Runtime，目标机无需预装 .NET |
@@ -43,6 +43,8 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 State Plane 已具备真实 SQLite/WAL、短事务 CAS、operation 幂等、依赖边原子提交、语义事件冲突检测、内容寻址 Artifact、Doctor、保守 GC、可验证备份/恢复，以及 Community 5.18 `.ai` 状态的验证式单向导入。Legacy Inventory 将受支持事实导入State Plane，将非权威脚本、文档和工具惰性原地保留；只有可能污染Identity、Migration Marker或State Authority的未知内容才阻断。Project Bootstrap 使用同一只读 Preflight 识别新项目、旧版项目、活动项目、移动、显式 Fork、身份冲突、损坏状态和未完成迁移；Project ID 不再由路径推导，普通读命令不会创建 UUID。所有生产状态变化收敛到 `StateCoordinator`，测试会阻断新的平行写入口。
 
 Runtime 已建立 provider-neutral Adapter contract、Task/Agent/Lease/Ownership/Worktree 同代提交、PID+启动时间+可执行身份验证、最小交接包、崩溃恢复、两阶段资源释放、真实 Git Worktree、风险自适应冲突调度、持久化 Merge Queue 和 Codex CLI Adapter。低/中风险最多三个互不重叠 Writer Lane；高/关键风险收敛到一个 Writer，并要求独立 Assurance Lane。Merge Queue 只授权已冻结、已验证且仍基于目标 HEAD 的候选，不静默执行合并。
+
+Live Adoption 通过 `attach` / `checkpoint` / `resume` 在自然 Turn 边界把 Community 5.18 当前 Goal、Task 与有效 Checkpoint 绑定到同一 5.19 Project；Provider Session 仅保存指纹。接管事务不会恢复旧 Lease、Agent、Process 或重复创建 Task/Worktree，后续 Context 只从有界活动索引解析。Community 侧保持薄检测、Bootstrap 与 fallback，Pro Runtime 仍是状态和恢复权威。
 
 Context Resolver、`hiker resume`、结构化 Decision Memory、Intent/Dependency/Evidence Graph、结构化 Goal Change、50 服务语义拓扑、资源租约、SQLite 查询计划与并发证据、签名 Entitlement、设备激活、Offline Grace、签名 Module/Update、默认拒绝降级和签名回滚授权均已实现。Decision Memory 保留已拒绝方案及原因，并原子替代当前决策；Goal Change 接受模型给出的 `AFFECTED / UNAFFECTED / SUPERSEDED / REQUIRES_REVIEW` 分类，但只由 Runtime 验证 Task/Evidence 绑定并在一个 CAS 事务内提交 Goal Revision、Task 绑定和必要的证据失效。两者都不使用关键词替代语义判断。
 

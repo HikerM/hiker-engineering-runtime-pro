@@ -44,6 +44,7 @@ public static class EntityKinds
     public const string Worktree = "WORKTREE";
     public const string RuntimeLease = "RUNTIME_LEASE";
     public const string Agent = "AGENT";
+    public const string ProviderSessionBinding = "PROVIDER_SESSION_BINDING";
     public const string Checkpoint = "CHECKPOINT";
     public const string Evidence = "EVIDENCE";
     public const string Candidate = "CANDIDATE";

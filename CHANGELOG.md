@@ -1,6 +1,22 @@
 # Changelog
 
-## 5.19.0-rc.6 — Unreleased
+## 5.19.0-rc.7 — Unreleased
+
+### Added
+
+- `GA-5.19-LIVE-ADOPTION-001`：新增 `attach`、`checkpoint` 与自动 `resume` 接管，在自然安全边界把 Community 5.18 的当前 Goal、Task、Checkpoint 和既有 Codex Provider Session 绑定到同一 5.19 Project。
+- Community 侧仅提供 Pro 检测、安全边界触发与 fallback；Project Bootstrap、State Plane、Ownership、Context Resolver、Recovery 与幂等事务继续只由 Pro Runtime 实现。
+
+### Safety
+
+- Provider Session 原始标识不写入 State/Event/Evidence/CLI JSON，仅保存 SHA-256 指纹；接管不恢复 Legacy Lease、Agent、Process 或创建第二个 Task/Worktree。
+- 活动上下文依赖边按 Turn 原子替换，100 轮接管与 Checkpoint 后热图和 Context 读取保持有界；冷历史不会进入默认 Context。
+
+### Verification
+
+- 私有源码完整 Unit / Integration：126/126 PASS；Community 核心插件：76/76 PASS，其中薄桥 6/6 PASS。真实原长期 Codex 会话 Field 接管仍是 rc.7 宣布 Live Adoption PASS 前的强制门禁。
+
+## 5.19.0-rc.6 — 2026-08-27
 
 ### Added
 
