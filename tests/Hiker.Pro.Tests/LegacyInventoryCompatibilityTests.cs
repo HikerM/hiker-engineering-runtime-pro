@@ -84,7 +84,7 @@ public sealed class LegacyInventoryCompatibilityTests
     }
 
     [Fact]
-    public async Task UnsupportedStructuredLegacyPath_RemainsReviewBlockedWithoutStateWrite()
+    public async Task UnsupportedStructuredLegacyPath_IsPreservedAndDoesNotBlockMigration()
     {
         var root = NewRoot();
         try
@@ -94,16 +94,23 @@ public sealed class LegacyInventoryCompatibilityTests
             var customHash = HashFile(Path.Combine(root, ".ai", "architecture", "custom.json"));
 
             var migration = await RunCliAsync(root, "migrate-community");
-            var blocked = Json(migration).GetProperty("project");
+            var result = Json(migration);
+            var import = result.GetProperty("import");
+            var projectId = import.GetProperty("project_id").GetString();
 
-            Assert.Equal(2, migration.ExitCode);
-            Assert.Equal("UNKNOWN_AI_CONTENT", blocked.GetProperty("reason_code").GetString());
-            Assert.Equal(1, blocked.GetProperty("ai_content").GetProperty("legacy_inventory").GetProperty("unknown_requires_review").GetInt32());
+            Assert.Equal(0, migration.ExitCode);
+            Assert.Equal("IMPORTED", import.GetProperty("status").GetString());
+            Assert.Equal(0, import.GetProperty("inventory").GetProperty("unknown_requires_review").GetInt32());
             Assert.Contains(
-                blocked.GetProperty("ai_content").GetProperty("unknown_items").EnumerateArray().Select(static item => item.GetString()),
-                static item => item is not null && item.Contains("architecture/custom.json:UNSUPPORTED_LEGACY_PATH", StringComparison.Ordinal));
-            Assert.False(File.Exists(Path.Combine(root, ".ai", "state", "hiker-state.db")));
+                import.GetProperty("inventory").GetProperty("entries").EnumerateArray(),
+                static item => item.GetProperty("path").GetString() == "architecture/custom.json" &&
+                               item.GetProperty("handling").GetString() == "UNTRUSTED_LAZY_SOURCE_PRESERVE_ONLY");
+            Assert.True(File.Exists(Path.Combine(root, ".ai", "state", "hiker-state.db")));
             Assert.Equal(customHash, HashFile(Path.Combine(root, ".ai", "architecture", "custom.json")));
+            await using (var store = new SqliteStateStore(new ProjectLayout(root)))
+            {
+                Assert.Null(await store.ReadAsync(new StateKey(projectId!, EntityKinds.Decision, "architecture:custom.json")));
+            }
         }
         finally
         {
@@ -112,7 +119,7 @@ public sealed class LegacyInventoryCompatibilityTests
     }
 
     [Fact]
-    public async Task MalformedKnownRequirementFact_RemainsReviewBlockedWithoutPartialIdentity()
+    public async Task MalformedKnownRequirementFact_IsPreservedWithoutPartialImport()
     {
         var root = NewRoot();
         try
@@ -121,14 +128,21 @@ public sealed class LegacyInventoryCompatibilityTests
             await WriteAsync(root, "requirements/ledger.json", "{\"schema_version\":\"1.0.0\",\"revision\":1,\"requirements\":{}}");
 
             var migration = await RunCliAsync(root, "migrate-community");
-            var blocked = Json(migration).GetProperty("project");
+            var result = Json(migration);
+            var import = result.GetProperty("import");
+            var projectId = import.GetProperty("project_id").GetString();
 
-            Assert.Equal(2, migration.ExitCode);
-            Assert.Equal("UNKNOWN_AI_CONTENT", blocked.GetProperty("reason_code").GetString());
+            Assert.Equal(0, migration.ExitCode);
+            Assert.Equal("IMPORTED", import.GetProperty("status").GetString());
             Assert.Contains(
-                blocked.GetProperty("ai_content").GetProperty("unknown_items").EnumerateArray().Select(static item => item.GetString()),
-                static item => item is not null && item.Contains("requirements/ledger.json:INVALID_LEGACY_FORMAT", StringComparison.Ordinal));
-            Assert.False(File.Exists(Path.Combine(root, ".ai", "state", "hiker-state.db")));
+                import.GetProperty("inventory").GetProperty("entries").EnumerateArray(),
+                static item => item.GetProperty("path").GetString() == "requirements/ledger.json" &&
+                               item.GetProperty("handling").GetString() == "INVALID_FACT_SOURCE_PRESERVE_NO_IMPORT");
+            Assert.True(File.Exists(Path.Combine(root, ".ai", "state", "hiker-state.db")));
+            await using (var store = new SqliteStateStore(new ProjectLayout(root)))
+            {
+                Assert.Null(await store.ReadAsync(new StateKey(projectId!, EntityKinds.Requirement, "requirements:ledger.json")));
+            }
         }
         finally
         {
@@ -188,6 +202,7 @@ public sealed class LegacyInventoryCompatibilityTests
 
     private static void DeleteRoot(string root)
     {
+        SqliteConnection.ClearAllPools();
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
     }
 

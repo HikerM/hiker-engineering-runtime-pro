@@ -55,14 +55,17 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
                 using var document = JsonDocument.Parse(payload, new JsonDocumentOptions { MaxDepth = 128 });
                 if (!Community518SourceCatalog.TryValidate(document.RootElement, source.ValidationProfile, out var validationReason))
                 {
-                    rejected.Add($"{relative}:INVALID_LEGACY_FORMAT:{validationReason}");
+                    // The inventory records this source as inert preserved content. It is
+                    // never imported into active state, but it must not block unrelated
+                    // validated facts or require the user to edit legacy files.
                     continue;
                 }
                 payload = JsonSerializer.Serialize(document.RootElement);
             }
             catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
             {
-                rejected.Add($"{relative}:{exception.GetType().Name}");
+                // A source that cannot be validated remains in place and outside State
+                // Plane authority. Importing the remaining validated facts is safe.
                 continue;
             }
 

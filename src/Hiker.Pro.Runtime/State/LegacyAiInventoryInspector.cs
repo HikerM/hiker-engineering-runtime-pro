@@ -59,6 +59,7 @@ internal static class LegacyAiInventoryInspector
                     layout,
                     directoryPolicy.Key,
                     directoryPolicy.Value,
+                    entries,
                     unknown,
                     fingerprintItems)
                 : 0;
@@ -96,13 +97,14 @@ internal static class LegacyAiInventoryInspector
         ProjectLayout layout,
         string relativeDirectory,
         DirectoryPolicy directoryPolicy,
+        List<LegacyInventoryEntry> entries,
         List<string> unknown,
         List<string> fingerprintItems)
     {
         var directory = layout.ResolveAiRelativePath(relativeDirectory);
         if (IsReparsePoint(directory))
         {
-            AddUnknown(unknown, $"{relativeDirectory}:REPARSE_POINT");
+            entries.Add(IsolatedEntry(relativeDirectory, "REPARSE_POINT", "NO_FOLLOW_SOURCE_PRESERVE_ONLY"));
             return 0;
         }
 
@@ -120,14 +122,14 @@ internal static class LegacyAiInventoryInspector
                     scanned++;
                     if (scanned > MaxFiles)
                     {
-                        AddUnknown(unknown, $"{relativeDirectory}:INVENTORY_LIMIT_EXCEEDED");
+                        entries.Add(IsolatedEntry(relativeDirectory, "INVENTORY_LIMIT_EXCEEDED", "BOUNDED_SCAN_SOURCE_PRESERVE_ONLY"));
                         break;
                     }
 
                     var relative = Path.GetRelativePath(layout.AiRoot, item).Replace('\\', '/');
                     if (IsReparsePoint(item))
                     {
-                        AddUnknown(unknown, $"{relative}:REPARSE_POINT");
+                        entries.Add(IsolatedEntry(relative, "REPARSE_POINT", "NO_FOLLOW_SOURCE_PRESERVE_ONLY"));
                         continue;
                     }
 
@@ -135,7 +137,7 @@ internal static class LegacyAiInventoryInspector
                     {
                         fingerprintItems.Add($"D\0{relative}");
                         if (directoryPolicy.OpaquePreserved) pending.Push(item);
-                        else AddUnknown(unknown, $"{relative}:UNSUPPORTED_LEGACY_DIRECTORY");
+                        else PreserveUncatalogued(layout, item, relative, entries, fingerprintItems);
                         continue;
                     }
 
@@ -144,7 +146,7 @@ internal static class LegacyAiInventoryInspector
                     if (Community518SourceCatalog.TryResolve(relative, item, out var source))
                     {
                         if (Community518SourceCatalog.TryValidate(source, out var reason)) count++;
-                        else AddUnknown(unknown, $"{relative}:INVALID_LEGACY_FORMAT:{reason}");
+                        else entries.Add(IsolatedEntry(relative, $"INVALID_LEGACY_FORMAT:{reason}", "INVALID_FACT_SOURCE_PRESERVE_NO_IMPORT"));
                         continue;
                     }
 
@@ -156,14 +158,17 @@ internal static class LegacyAiInventoryInspector
 
                     if (!directoryPolicy.OpaquePreserved)
                     {
-                        AddUnknown(unknown, $"{relative}:UNSUPPORTED_LEGACY_PATH");
+                        PreserveUncatalogued(layout, item, relative, entries, fingerprintItems);
                     }
                 }
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            AddUnknown(unknown, $"{relativeDirectory}:INVENTORY_UNREADABLE:{exception.GetType().Name.ToUpperInvariant()}");
+            entries.Add(IsolatedEntry(
+                relativeDirectory,
+                $"INVENTORY_UNREADABLE:{exception.GetType().Name.ToUpperInvariant()}",
+                "UNREADABLE_SOURCE_PRESERVE_NO_IMPORT"));
         }
 
         return count;
@@ -196,15 +201,41 @@ internal static class LegacyAiInventoryInspector
                 continue;
             }
 
-            foreach (var finding in inspection.Findings) AddUnknown(unknown, finding);
-            entries.Add(new LegacyInventoryEntry(
+            entries.Add(IsolatedEntry(
                 name,
-                "POTENTIAL_HIKER_STATE_AUTHORITY",
-                new[] { LegacyInventoryClassifications.UnknownRequiresReview },
-                "BLOCKED_REQUIRES_REVIEW",
-                0));
+                string.Join('|', inspection.Findings),
+                "INERT_SOURCE_PRESERVE_NO_IMPORT_NO_EXECUTE"));
         }
     }
+
+    private static void PreserveUncatalogued(
+        ProjectLayout layout,
+        string item,
+        string relative,
+        List<LegacyInventoryEntry> entries,
+        List<string> fingerprintItems)
+    {
+        var inspection = LegacyUntrustedContentInspector.Inspect(layout, item);
+        fingerprintItems.AddRange(inspection.FingerprintItems);
+        entries.Add(inspection.SafeToPreserve
+            ? new LegacyInventoryEntry(
+                relative,
+                "PRESERVED_UNTRUSTED_LEGACY_CONTENT",
+                new[] { LegacyInventoryClassifications.SafePreservedContent },
+                "UNTRUSTED_LAZY_SOURCE_PRESERVE_ONLY",
+                0)
+            : IsolatedEntry(
+                relative,
+                string.Join('|', inspection.Findings),
+                "INERT_SOURCE_PRESERVE_NO_IMPORT_NO_EXECUTE"));
+    }
+
+    private static LegacyInventoryEntry IsolatedEntry(string path, string reason, string handling) => new(
+        path,
+        $"ISOLATED_UNTRUSTED_LEGACY_CONTENT:{reason}",
+        new[] { LegacyInventoryClassifications.SafePreservedContent },
+        handling,
+        0);
 
     private static LegacyInventoryEntry PreservedEntry(string path, bool temporary) => new(
         path,
