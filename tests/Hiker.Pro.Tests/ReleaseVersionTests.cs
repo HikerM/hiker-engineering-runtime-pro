@@ -73,7 +73,9 @@ public sealed class ReleaseVersionTests
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            if (File.Exists(Path.Combine(directory.FullName, "release-versions.json")) && Directory.Exists(Path.Combine(directory.FullName, ".git")))
+            var gitMetadata = Path.Combine(directory.FullName, ".git");
+            if (File.Exists(Path.Combine(directory.FullName, "release-versions.json")) &&
+                (Directory.Exists(gitMetadata) || File.Exists(gitMetadata)))
                 return directory.FullName;
             directory = directory.Parent;
         }
