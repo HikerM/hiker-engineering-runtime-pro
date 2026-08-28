@@ -1,6 +1,6 @@
 # Hiker 5.19 Pro Project State
 
-- Product: `5.19.0-rc.8`
+- Product: `5.19.0-rc.9`
 - Runtime: `0.1.0`
 - State Schema: `3.0.0`
 - Release branch requirement: `main`
