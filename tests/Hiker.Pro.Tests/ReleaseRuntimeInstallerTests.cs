@@ -227,7 +227,7 @@ public sealed class ReleaseRuntimeInstallerTests
             var fixture = new Fixture(root, key, package, publicKey, fingerprint);
             if (withFlatRuntime)
             {
-                CopyDirectory(Path.Combine(repository, "src", "Hiker.Pro.Cli", "bin", "Debug", "net9.0"), fixture.Home);
+                CopyDirectory(Path.Combine(repository, "src", "Hiker.Pro.Cli", "bin", configuration, "net9.0"), fixture.Home);
                 await File.WriteAllTextAsync(Path.Combine(fixture.Home, "hostfxr.dll"), "fixture");
                 await File.WriteAllTextAsync(Path.Combine(fixture.Home, "hostpolicy.dll"), "fixture");
             }
