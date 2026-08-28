@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <HikerProductVersion>5.19.0-rc.7</HikerProductVersion>
+    <HikerProductVersion>5.19.0-rc.8</HikerProductVersion>
     <HikerRuntimeVersion>0.1.0</HikerRuntimeVersion>
     <HikerStateSchemaVersion>3.0.0</HikerStateSchemaVersion>
     <Version>$(HikerProductVersion)</Version>

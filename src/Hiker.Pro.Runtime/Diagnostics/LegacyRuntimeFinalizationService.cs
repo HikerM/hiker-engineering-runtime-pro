@@ -20,7 +20,11 @@ public sealed class LegacyRuntimeFinalizationService(
             cancellationToken).ConfigureAwait(false);
         var projectId = project.ProjectId!;
         var inspection = await store.InspectLegacyRuntimeAsync(projectId, cancellationToken).ConfigureAwait(false);
-        var migrationComplete = project.Identity.CompletedCommunityImportProjectIds.Contains(projectId, StringComparer.Ordinal);
+        var marker = await state.ReadAsync(
+            new StateKey(projectId, EntityKinds.Migration, "community-5.18"),
+            cancellationToken).ConfigureAwait(false);
+        var migrationComplete = marker is not null &&
+                                project.Identity.CompletedCommunityImportProjectIds.Contains(projectId, StringComparer.Ordinal);
         if (!migrationComplete || inspection.RequiresReview > 0)
         {
             var health = await CheckHealthAsync(projectId, cancellationToken).ConfigureAwait(false);
@@ -48,8 +52,10 @@ public sealed class LegacyRuntimeFinalizationService(
 
         var result = await state.FinalizeLegacyRuntimeStateAsync(
             new LegacyRuntimeFinalizeRequest(
-                LegacyRuntimeFinalizationFacts.OperationId(projectId),
-                projectId),
+                LegacyRuntimeFinalizationFacts.OperationId(projectId, marker!.SourceFingerprint, marker.Generation),
+                projectId,
+                marker.SourceFingerprint,
+                marker.Generation),
             cancellationToken).ConfigureAwait(false);
         var after = await CheckHealthAsync(projectId, cancellationToken).ConfigureAwait(false);
         var reason = after.Status == "HEALTHY"

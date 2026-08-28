@@ -17,11 +17,11 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 
 | 项目 | 当前值 |
 | --- | --- |
-| Pro 产品版本 | `5.19.0-rc.7` |
+| Pro 产品版本 | `5.19.0-rc.8` |
 | Runtime 版本 | `0.1.0` |
 | State Schema | `3.0.0` |
 | Runtime | .NET 9；`win-x64` 发行包自包含 Runtime，目标机无需预装 .NET |
-| Community 基线 | `HikerM/hiker-workflow-skill-pack` `main@05e94e32af719c81f740fe2af08c35f98a527588` |
+| Community 基线 | `HikerM/hiker-workflow-skill-pack` `main@8a612eb499c57be6a2c7da4d6dfd11d97d6c599d` |
 | Community 版本 | `5.18.0+codex.20260826161321` |
 | Pro 仓库 | `HikerM/hiker-engineering-runtime-pro`，Private |
 
@@ -34,6 +34,7 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 - [Project State Plane](docs/architecture/state-plane.md)
 - [Project Bootstrap and Identity](docs/architecture/project-bootstrap-identity.md)
 - [Autonomous Runtime and Writer Safety](docs/architecture/autonomous-runtime.md)
+- [Stable Runtime Activation](docs/architecture/runtime-activation.md)
 - [Environment & Resource Control Plane](docs/architecture/environment-resource-control.md)
 - [Change Intelligence](docs/architecture/change-intelligence.md)
 - [Context, Graph, Services, and Data Performance](docs/architecture/context-graph-data.md)
@@ -49,7 +50,9 @@ Runtime 已建立 provider-neutral Adapter contract、Task/Agent/Lease/Ownership
 
 Environment & Resource Control Plane 使用可扩展 Provider 字符串、能力图、版本化 Profile、Task 级 Instance、通用 Resource Lease 和精确 Process Registry 管理本机直接环境、隔离工作区及组合 Provider。核心没有 `Native / Docker / Hybrid / Remote` 模式枚举，也不按 Provider 产品名分支。环境发现不产生选择状态；Verified Profile 才能被 Task 绑定。Runtime Start、Handoff、Crash Recovery 和 Completion 会验证或转移同一 Environment Instance，恢复前重新核验真实资源，终态先释放环境再归档 Writer 事实。已接管的外部环境与进程只解除 Hiker 绑定，不会被停止或删除。
 
-Live Adoption 通过 `attach` / `checkpoint` / `resume` 在自然 Turn 边界把 Community 5.18 当前 Goal、Task 与有效 Checkpoint 绑定到同一 5.19 Project；Provider Session 仅保存指纹。接管事务不会恢复旧 Lease、Agent、Process 或重复创建 Task/Worktree，后续 Context 只从有界活动索引解析。Community 侧保持薄检测、Bootstrap 与 fallback，Pro Runtime 仍是状态和恢复权威。
+Live Adoption 通过 `attach` / `checkpoint` / `resume` 在自然 Turn 边界把 Community 5.18 当前 Goal、Task 与有效 Checkpoint 绑定到同一 5.19 Project；Provider Session 仅保存指纹。普通 `attach` 会先执行确定性 Preflight，并在同一既有 Project Identity 下自动完成安全 Legacy migration、已知旧运行态 Finalize、Doctor 复检和 Adoption；普通调用方不需要提供 migration operation ID、Project ID、Goal ID 或 Task ID。接管事务不会恢复旧 Lease、Agent、Process 或重复创建 Task/Worktree，后续 Context 只从有界活动索引解析。Community 侧保持薄检测、Bootstrap 与 fallback，Pro Runtime 仍是状态和恢复权威。
+
+CLI 的 `--json` 模式使用 `hiker-cli/v1` 单文档 Envelope：stdout 只包含一个主 JSON，stderr 只包含非 JSON 诊断，Envelope 内 `exit_code` 与进程退出码一致，并明确报告 `PRO_ACTIVE / PRO_DEGRADED / COMMUNITY_FALLBACK / PRO_REQUIRED_BLOCKED`。稳定 Launcher 从原子 Runtime Pointer 选择不可变版本目录；更新只切换 Pointer，不替换正在运行的进程或项目 `.ai`。
 
 Change Intelligence 复用现有 `ImpactGraphEngine` 和 `StateCoordinator`：LOCAL 变更走有界、零写快路径；共享、跨域和系统性变更才要求不可变 Change Contract、完整 Blast、单 Writer/Assurance/回滚策略。连续失败会进入 Fix Loop 和 Root Cause Mode，临时机制必须登记 Patch Debt，Scope/Invariant Guard 阻断越界与回归。观察结果只形成校准证据，不会自动污染权威依赖图。
 
@@ -69,7 +72,7 @@ Context Resolver、`hiker resume`、结构化 Decision Memory、Intent/Dependenc
 
 这些结果分别属于 `DETERMINISTIC_VERIFIED`、`SIMULATION_PROVEN` 或 `REAL_INTEGRATION_PROVEN`；不等于客户现场长期运行。当前是发布候选，最终状态只由同一提交生成的商业 Gate 决定。
 
-Community 5.18 导入的运行控制事实不会被激活为 5.19 Runtime Writer、Lease、Agent 或 Worktree。完成迁移后，`hiker finalize-legacy` 会先创建可验证备份，再用单个 SQLite 事务将已知 schema 2.0.0 的旧 Task/Checkpoint/Ownership/Worktree/Lease/Agent 事实转为只读 `Archived`；payload、authority、schema 与 fingerprint 保持不变，未知格式仍然阻断并要求复核。
+Community 5.18 导入的运行控制事实不会被激活为 5.19 Runtime Writer、Lease、Agent 或 Worktree。普通 `attach` 会自动调用同一内部收敛链；`hiker migrate-community` 与 `hiker finalize-legacy` 仅保留为高级诊断/恢复命令。Finalize 会先创建可验证备份，再用单个 SQLite 事务将已知 schema 2.0.0 的旧 Task/Checkpoint/Ownership/Worktree/Lease/Agent 事实转为只读 `Archived`；payload、authority、schema 与 fingerprint 保持不变。普通未知脚本或文档惰性原地保留，疑似权威状态、未知 schema、reparse/path escape、损坏或超出盘点预算的数据确定性阻断。
 
 ## 当前验证结果
 
@@ -77,7 +80,7 @@ Community 5.18 导入的运行控制事实不会被激活为 5.19 Runtime Writer
 
 | 验证面 | 结果 | 证据等级 |
 | --- | --- | --- |
-| Unit / Integration | 当前源码 172/172 PASS（含 `FIELD-5.19-001`、Live Adoption、Environment & Resource Control Plane、Change Intelligence、Project Identity/Bootstrap、Legacy Finalize 与无全局 .NET 自包含执行回归）；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
+| Unit / Integration | 当前源码 201/201 PASS（含 `FIELD-5.19-001`、Live Adoption、CLI Bridge Contract、Legacy Auto Convergence、Runtime Activation、Environment & Resource Control Plane、Change Intelligence、Project Identity/Bootstrap、Legacy Finalize 与无全局 .NET 自包含执行回归）；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
 | Community 5.18 回归 | 五插件合计 309/309 PASS；核心 82/82、Community→Pro Bridge 12/12，公开工作区保持干净 | `DETERMINISTIC_VERIFIED` |
 | Environment Control | 本机直接接管、真实隔离目录、组合 Provider、Runtime/Handoff/Recovery/Release 通过；1,024 条冷历史后 Context/Doctor P95 保持有界 | `REAL_INTEGRATION_PROVEN` |
 | Change Intelligence | LOCAL 零写快路径、共享 Blast、1024 条冷历史有界 Context、最近 3 个真实迁移修复提交的 Fix Loop 影子回放通过；真实 Field 返工改善尚未证明 | `REAL_INTEGRATION_PROVEN` |
@@ -103,18 +106,16 @@ Change Intelligence 专项验证中，LOCAL Probe P50/P95 为 0.0354/0.0465 ms�
 `hiker-pro-<version>-win-x64.zip` 是目录式自包含发行包。目标 Windows x64 电脑不需要安装 .NET SDK 或 .NET Runtime，也不依赖全局 `DOTNET_ROOT`。必须完整解压 `payload` 中的 `hiker.exe`、`hostfxr.dll`、`hostpolicy.dll`、`coreclr.dll`、托管程序集和 JSON；不得只复制 `hiker.exe`。
 
 ```powershell
-hiker version
-hiker init --root <project>
+hiker version --json
 hiker doctor --root <project>
 hiker status --root <project>
-hiker resume --root <project> --goal-id <goal-id>
 hiker backup --root <project>
 hiker export --root <project>
-hiker migrate-community --root <project>
-hiker finalize-legacy --root <project>
 ```
 
-`init/status/doctor/resume/backup/export/migrate-community/finalize-legacy` 经过同一个 Project Preflight。`finalize-legacy` 只接受迁移 marker 已完成且 Project ID 唯一的项目；第一次返回 `FINALIZED`，再次运行返回 `ALREADY_FINALIZED` 且不增加 generation。`--project-id` 只用于恢复、CI 和显式 Fork 等高级场景；已有项目会从唯一权威状态自动解析原 ID，身份冲突或损坏状态会阻断而不会生成第二个 UUID。显式 Fork 必须提供新的稳定 ID，并在原子事务中继承可复用事实、清除运行中 Task/Lease/Ownership/Worktree 绑定：
+Community Bridge 在宿主提供 Provider Session 与安全边界后调用 `attach`；该命令会自动分流新项目、已激活项目、安全 Legacy 项目和半迁移项目，普通用户不需要选择 `init / migrate-community / finalize-legacy` 的顺序，也不需要生成 operation ID、Project ID、Goal ID 或 Task ID。`init`、`migrate-community` 与 `finalize-legacy` 只保留为高级诊断/恢复命令；所有入口仍经过同一个 Project Preflight。已有项目会从唯一权威状态自动解析原 ID，身份冲突、未知 schema、损坏或疑似权威冲突会结构化阻断而不会生成第二个 UUID。
+
+显式 Fork 必须提供新的稳定 ID，并在原子事务中继承可复用事实、清除运行中 Task/Lease/Ownership/Worktree 绑定：
 
 ```powershell
 hiker fork --root <copied-project> --project-id <new-stable-id>
@@ -141,7 +142,9 @@ dotnet test -c Release
 | `src/Hiker.Pro.Runtime/Environment` | Provider Contract、Profile/Instance、Resource/Process Lease、Doctor、Recovery 与 Release |
 | `src/Hiker.Pro.Runtime/ChangeIntelligence` | Change Risk、Contract/Blast、Fix Loop、Patch Debt、Scope/Invariant Guard 与 Outcome Calibration |
 | `src/Hiker.Pro.Runtime` | State、Task、Lease、Worktree、Checkpoint、Recovery、Context、Graph 与商业信任边界 |
-| `src/Hiker.Pro.Cli` | 面向工程项目的薄 CLI 入口 |
+| `src/Hiker.Pro.Cli` | 面向工程项目的薄 CLI 与 `hiker-cli/v1` machine contract |
+| `src/Hiker.Pro.Activation` | 验证式 Runtime staging、不可变版本目录、原子 Pointer、兼容性与回滚 |
+| `src/Hiker.Pro.Launcher` | 稳定入口，只从活动 Pointer 解析并启动当前 Runtime |
 | `tools/Hiker.Pro.Verification` | 老化、规模、真实服务、Codex Runtime、Environment、Change Intelligence 与 COMM-G1–G17 验证 |
 | `tools/Hiker.Pro.Release` | 版本事实、签名 RC 构建、独立包校验与商业发布 Gate |
 | `tests/` | 单元、集成、故障注入与回归测试 |

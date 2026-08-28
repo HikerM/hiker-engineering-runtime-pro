@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Hiker.Pro.Activation;
 using Hiker.Pro.Trust;
 
 namespace Hiker.Pro.ReleaseTool;
@@ -189,6 +190,16 @@ internal sealed class ReleasePackageVerifier
     private static ReleaseGateCheck VerifySelfContainedRuntime(string extraction)
     {
         var payload = Path.Combine(extraction, "payload");
+        var pointerPath = Path.Combine(payload, "state", "current-runtime.json");
+        ActiveRuntimePointer? pointer = null;
+        if (File.Exists(pointerPath))
+        {
+            pointer = JsonSerializer.Deserialize<ActiveRuntimePointer>(File.ReadAllText(pointerPath), Json);
+        }
+        var runtimeRoot = pointer is null
+            ? Path.Combine(payload, "missing-runtime")
+            : Path.Combine(payload, "runtimes", pointer.ActiveRuntime);
+        var launcherRoot = Path.Combine(payload, "bin");
         var required = new[]
         {
             "hiker.exe",
@@ -200,30 +211,34 @@ internal sealed class ReleasePackageVerifier
             "clrjit.dll",
             "System.Private.CoreLib.dll"
         };
-        var missing = required.Where(file => !File.Exists(Path.Combine(payload, file))).ToArray();
-        var runtimeConfigPath = Path.Combine(payload, "hiker.runtimeconfig.json");
-        var frameworkDependent = true;
-        if (File.Exists(runtimeConfigPath))
-        {
-            using var document = JsonDocument.Parse(File.ReadAllText(runtimeConfigPath));
-            var runtimeOptions = document.RootElement.GetProperty("runtimeOptions");
-            frameworkDependent = runtimeOptions.TryGetProperty("framework", out _) || runtimeOptions.TryGetProperty("frameworks", out _);
-        }
-
-        var runtimeFiles = Directory.Exists(payload)
-            ? Directory.EnumerateFiles(payload, "*", SearchOption.TopDirectoryOnly).Count()
-            : 0;
-        var pass = missing.Length == 0 && !frameworkDependent && runtimeFiles >= 50;
+        var missingRuntime = required.Where(file => !File.Exists(Path.Combine(runtimeRoot, file))).ToArray();
+        var missingLauncher = required.Where(file => !File.Exists(Path.Combine(launcherRoot, file))).ToArray();
+        var frameworkDependent = IsFrameworkDependent(Path.Combine(runtimeRoot, "hiker.runtimeconfig.json")) ||
+                                 IsFrameworkDependent(Path.Combine(launcherRoot, "hiker.runtimeconfig.json"));
+        var runtimeFiles = Directory.Exists(runtimeRoot) ? Directory.EnumerateFiles(runtimeRoot, "*", SearchOption.TopDirectoryOnly).Count() : 0;
+        var launcherFiles = Directory.Exists(launcherRoot) ? Directory.EnumerateFiles(launcherRoot, "*", SearchOption.TopDirectoryOnly).Count() : 0;
+        var pass = pointer is not null && missingRuntime.Length == 0 && missingLauncher.Length == 0 && !frameworkDependent && runtimeFiles >= 50 && launcherFiles >= 50;
         return new ReleaseGateCheck(
             "SELF_CONTAINED_RUNTIME",
             pass ? "PASS" : "BLOCKED",
             "The Windows x64 payload carries the .NET runtime and does not declare a machine-wide framework dependency",
             new Dictionary<string, object?>
             {
-                ["missing_runtime_files"] = missing,
+                ["missing_runtime_files"] = missingRuntime,
+                ["missing_launcher_files"] = missingLauncher,
                 ["framework_dependent"] = frameworkDependent,
-                ["payload_file_count"] = runtimeFiles
+                ["runtime_file_count"] = runtimeFiles,
+                ["launcher_file_count"] = launcherFiles,
+                ["active_runtime"] = pointer?.ActiveRuntime
             });
+    }
+
+    private static bool IsFrameworkDependent(string runtimeConfigPath)
+    {
+        if (!File.Exists(runtimeConfigPath)) return true;
+        using var document = JsonDocument.Parse(File.ReadAllText(runtimeConfigPath));
+        var runtimeOptions = document.RootElement.GetProperty("runtimeOptions");
+        return runtimeOptions.TryGetProperty("framework", out _) || runtimeOptions.TryGetProperty("frameworks", out _);
     }
 
     private static async Task<ReleaseGateCheck> RunCleanInstallAsync(
@@ -232,7 +247,7 @@ internal sealed class ReleasePackageVerifier
         CancellationToken cancellationToken)
     {
         var payload = Path.Combine(extraction, "payload");
-        var executable = Path.Combine(payload, "hiker.exe");
+        var executable = Path.Combine(payload, "bin", "hiker.exe");
         if (!OperatingSystem.IsWindows() || !File.Exists(executable))
         {
             return new ReleaseGateCheck(
@@ -245,6 +260,7 @@ internal sealed class ReleasePackageVerifier
         var project = Path.Combine(Path.GetTempPath(), $"hiker-pro-clean-project-{Guid.NewGuid():N}");
         var isolatedEnvironment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
+            ["HIKER_HOME"] = payload,
             ["PATH"] = string.Empty,
             ["DOTNET_ROOT"] = Path.Combine(project, "missing-dotnet"),
             ["DOTNET_ROOT_X64"] = null,

@@ -72,7 +72,7 @@ public sealed class PreservedUntrustedLegacyContentTests
     }
 
     [Fact]
-    public async Task AuthorityLikeJsonInsideUntrustedDirectory_IsInertAndDoesNotBlockMigration()
+    public async Task AuthorityLikeJsonInsideUntrustedDirectory_IsPreservedButBlocksMigration()
     {
         var root = NewRoot();
         try
@@ -86,15 +86,14 @@ public sealed class PreservedUntrustedLegacyContentTests
             var beforeHash = HashFile(candidate);
 
             var migration = await RunCliAsync(root, "migrate-community");
-            var import = Json(migration).GetProperty("import");
+            var blocked = Json(migration);
 
-            Assert.Equal(0, migration.ExitCode);
-            Assert.Equal("IMPORTED", import.GetProperty("status").GetString());
+            Assert.Equal(2, migration.ExitCode);
+            Assert.Equal("BLOCKED", blocked.GetProperty("status").GetString());
+            Assert.Equal("AUTHORITY_CONFLICT", blocked.GetProperty("project").GetProperty("reason_code").GetString());
             Assert.Contains(
-                import.GetProperty("inventory").GetProperty("entries").EnumerateArray(),
-                static item => item.GetProperty("path").GetString() == "tmp" &&
-                               item.GetProperty("handling").GetString() == "INERT_SOURCE_PRESERVE_NO_IMPORT_NO_EXECUTE");
-            Assert.True(File.Exists(AiPath(root, "state/hiker-state.db")));
+                blocked.GetProperty("project").GetProperty("ai_content").GetProperty("unknown_items").EnumerateArray(),
+                static item => item.GetString()!.Contains("POTENTIAL_STATE_AUTHORITY_PAYLOAD", StringComparison.Ordinal));
             Assert.Equal(beforeHash, HashFile(candidate));
         }
         finally
@@ -144,7 +143,7 @@ public sealed class PreservedUntrustedLegacyContentTests
     }
 
     [Fact]
-    public async Task ReparsePointEscapingAi_IsNotFollowedAndDoesNotBlockMigration()
+    public async Task ReparsePointEscapingAi_IsNotFollowedAndBlocksMigration()
     {
         var root = NewRoot();
         var outside = Path.Combine(Path.GetTempPath(), $"hiker-untrusted-outside-{Guid.NewGuid():N}");
@@ -159,14 +158,13 @@ public sealed class PreservedUntrustedLegacyContentTests
             await CreateDirectoryLinkAsync(link, outside);
 
             var migration = await RunCliAsync(root, "migrate-community");
-            var import = Json(migration).GetProperty("import");
+            var blocked = Json(migration);
 
-            Assert.Equal(0, migration.ExitCode);
+            Assert.Equal(2, migration.ExitCode);
+            Assert.Equal("BLOCKED", blocked.GetProperty("status").GetString());
             Assert.Contains(
-                import.GetProperty("inventory").GetProperty("entries").EnumerateArray(),
-                static item => item.GetProperty("path").GetString() == "tmp" &&
-                               item.GetProperty("handling").GetString() == "INERT_SOURCE_PRESERVE_NO_IMPORT_NO_EXECUTE");
-            Assert.True(File.Exists(AiPath(root, "state/hiker-state.db")));
+                blocked.GetProperty("project").GetProperty("ai_content").GetProperty("unknown_items").EnumerateArray(),
+                static item => item.GetString()!.Contains("REPARSE_POINT", StringComparison.Ordinal));
             Assert.Equal("outside", await File.ReadAllTextAsync(Path.Combine(outside, "outside.txt")));
         }
         finally
@@ -193,7 +191,7 @@ public sealed class PreservedUntrustedLegacyContentTests
     }
 
     [Fact]
-    public async Task UnboundedUntrustedDirectory_IsBoundedAndDoesNotBlockMigration()
+    public async Task UnboundedUntrustedDirectory_IsBoundedAndBlocksMigration()
     {
         var root = NewRoot();
         try
@@ -207,14 +205,13 @@ public sealed class PreservedUntrustedLegacyContentTests
             }
 
             var migration = await RunCliAsync(root, "migrate-community");
-            var import = Json(migration).GetProperty("import");
+            var blocked = Json(migration);
 
-            Assert.Equal(0, migration.ExitCode);
+            Assert.Equal(2, migration.ExitCode);
+            Assert.Equal("BLOCKED", blocked.GetProperty("status").GetString());
             Assert.Contains(
-                import.GetProperty("inventory").GetProperty("entries").EnumerateArray(),
-                static item => item.GetProperty("path").GetString() == "tmp" &&
-                               item.GetProperty("handling").GetString() == "INERT_SOURCE_PRESERVE_NO_IMPORT_NO_EXECUTE");
-            Assert.True(File.Exists(AiPath(root, "state/hiker-state.db")));
+                blocked.GetProperty("project").GetProperty("ai_content").GetProperty("unknown_items").EnumerateArray(),
+                static item => item.GetString()!.Contains("INVENTORY_LIMIT_EXCEEDED", StringComparison.Ordinal));
         }
         finally
         {

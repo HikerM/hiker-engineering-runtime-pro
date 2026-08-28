@@ -259,6 +259,76 @@ public sealed class LiveSessionAdoptionTests
     }
 
     [Fact]
+    public async Task MigrationIncomplete_AutoConvergesAndPreservesStableProjectIdentity()
+    {
+        await using var project = await TestProject.CreateAsync(ProjectId);
+        var identityKey = new StateKey(ProjectId, EntityKinds.Project, ProjectIdentityFacts.EntityId);
+        var identity = Assert.IsType<StateSnapshot>(await project.Store.ReadAsync(identityKey));
+        var identityPayload = System.Text.Json.Nodes.JsonNode.Parse(identity.PayloadJson)!.AsObject();
+        identityPayload["origin"] = "LEGACY_MIGRATION";
+        Assert.True((await project.Coordinator.CommitBatchAsync(new BatchTransactionRequest(
+            "mark-identity-as-legacy-migration",
+            new[]
+            {
+                new StateMutation(
+                    identity.Key,
+                    identity.Generation,
+                    identity.GoalRevision,
+                    identity.Lifecycle,
+                    identity.Authority,
+                    identity.SchemaVersion,
+                    identity.SourceFingerprint,
+                    identity.DependencyFingerprint,
+                    identityPayload.ToJsonString(),
+                    identity.Retention)
+            },
+            "PROJECT_IDENTITY_RECOVERED",
+            "LEGACY_MIGRATION_FIXTURE",
+            "{}"))).Committed);
+        var governance = Path.Combine(project.Layout.AiRoot, "governance");
+        var runtime = Path.Combine(project.Layout.AiRoot, "runtime");
+        Directory.CreateDirectory(governance);
+        Directory.CreateDirectory(runtime);
+        await File.WriteAllTextAsync(
+            Path.Combine(governance, "goal-contract.json"),
+            "{\"goal_id\":\"partial-goal\",\"status\":\"CURRENT\",\"revision\":5}");
+        await File.WriteAllTextAsync(
+            Path.Combine(runtime, "task.json"),
+            "{\"task_id\":\"partial-task\",\"goal_id\":\"partial-goal\",\"status\":\"RUNNING\",\"goal_revision\":5}");
+        var partial = new StateMutation(
+            new StateKey(ProjectId, EntityKinds.Task, "partial-task"),
+            0,
+            5,
+            StateLifecycle.Valid,
+            LegacyRuntimeFinalizationFacts.Authority,
+            LegacyRuntimeFinalizationFacts.SchemaVersion,
+            "partial-source",
+            "partial-dependency",
+            "{\"task_id\":\"partial-task\",\"goal_id\":\"partial-goal\",\"status\":\"RUNNING\",\"goal_revision\":5}");
+        Assert.True((await project.Coordinator.CommitBatchAsync(new BatchTransactionRequest(
+            "seed-partial-community-import",
+            new[] { partial },
+            "COMMUNITY_STATE_IMPORTED",
+            "PARTIAL_IMPORT_FIXTURE",
+            "{}"))).Committed);
+        Assert.Equal(ProjectBootstrapState.MigrationIncomplete, (await project.Bootstrap.PreflightAsync(ProjectBootstrapIntent.Read)).State);
+
+        var adopted = await Service(project).AdoptAsync(Request(boundary: "RECOVERY_CHECKPOINT", session: "partial-session"));
+        var after = await project.Bootstrap.PreflightAsync(ProjectBootstrapIntent.Read);
+        var identities = await project.Store.ReadAsync(ProjectId, EntityKinds.Project, lifecycle: null, limit: 8);
+        var activeTasks = await project.Store.ReadAsync(ProjectId, EntityKinds.Task, StateLifecycle.Valid, 8);
+
+        Assert.Equal(LiveAdoptionStatuses.Adopted, adopted.Status);
+        Assert.Equal(ProjectId, adopted.ProjectId);
+        Assert.Equal("partial-goal", adopted.GoalId);
+        Assert.Equal("partial-task", adopted.TaskId);
+        Assert.Equal(ProjectBootstrapState.ActiveExistingProject, after.State);
+        Assert.Equal(ProjectId, after.ProjectId);
+        Assert.Single(identities, static identity => identity.Key.EntityId == ProjectIdentityFacts.EntityId);
+        Assert.Single(activeTasks, static task => task.Key.EntityId == "partial-task");
+    }
+
+    [Fact]
     public async Task CommunityTaskAdvancedAfterInitialMigration_AdoptsLatestBoundedCurrentWork()
     {
         await using var project = await TestProject.CreateAsync();

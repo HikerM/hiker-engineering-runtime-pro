@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Hiker.Pro.Activation;
 using Hiker.Pro.Trust;
 
 namespace Hiker.Pro.ReleaseTool;
@@ -51,8 +52,45 @@ internal sealed class ReleasePackageBuilder
         Directory.CreateDirectory(payloadRoot);
         try
         {
-            await PublishAsync(root, payloadRoot, versions.Product, options, cancellationToken).ConfigureAwait(false);
+            var runtimeIdentity = $"{versions.Product}-{commit[..12]}";
+            var runtimeRoot = Path.Combine(payloadRoot, "runtimes", runtimeIdentity);
+            var launcherRoot = Path.Combine(payloadRoot, "bin");
+            await PublishAsync(root, runtimeRoot, launcherRoot, versions.Product, options, cancellationToken).ConfigureAwait(false);
             RemoveBuildOnlyFiles(payloadRoot);
+            var identity = new RuntimeIdentity(
+                versions.Product,
+                versions.Runtime,
+                versions.StateSchema,
+                Hiker.Pro.Context.LiveAdoptionProtocol.CurrentVersion,
+                commit,
+                runtimeIdentity,
+                options.Channel);
+            await File.WriteAllTextAsync(
+                Path.Combine(runtimeRoot, "runtime-identity.json"),
+                JsonSerializer.Serialize(identity, Json),
+                new UTF8Encoding(false),
+                cancellationToken).ConfigureAwait(false);
+            var pointer = new ActiveRuntimePointer(
+                "hiker-active-runtime/v1",
+                runtimeIdentity,
+                null,
+                runtimeIdentity,
+                versions.Product,
+                versions.Runtime,
+                versions.StateSchema,
+                Hiker.Pro.Context.LiveAdoptionProtocol.CurrentVersion,
+                commit,
+                1,
+                commit[..32],
+                publishedAt,
+                options.Channel);
+            var stateRoot = Path.Combine(payloadRoot, "state");
+            Directory.CreateDirectory(stateRoot);
+            await File.WriteAllTextAsync(
+                Path.Combine(stateRoot, "current-runtime.json"),
+                JsonSerializer.Serialize(pointer, Json),
+                new UTF8Encoding(false),
+                cancellationToken).ConfigureAwait(false);
             File.Copy(Path.Combine(root, "VERSION"), Path.Combine(payloadRoot, "VERSION"), overwrite: false);
             File.Copy(Path.Combine(root, "release-versions.json"), Path.Combine(payloadRoot, "release-versions.json"), overwrite: false);
             await File.WriteAllTextAsync(
@@ -140,12 +178,28 @@ internal sealed class ReleasePackageBuilder
 
     private static async Task PublishAsync(
         string repositoryRoot,
-        string payloadRoot,
+        string runtimeRoot,
+        string launcherRoot,
         string version,
         ReleaseBuildOptions options,
         CancellationToken cancellationToken)
     {
-        var project = Path.Combine(repositoryRoot, "src", "Hiker.Pro.Cli", "Hiker.Pro.Cli.csproj");
+        Directory.CreateDirectory(runtimeRoot);
+        Directory.CreateDirectory(launcherRoot);
+        var runtimeProject = Path.Combine(repositoryRoot, "src", "Hiker.Pro.Cli", "Hiker.Pro.Cli.csproj");
+        var launcherProject = Path.Combine(repositoryRoot, "src", "Hiker.Pro.Launcher", "Hiker.Pro.Launcher.csproj");
+        await PublishProjectAsync(runtimeProject, runtimeRoot, repositoryRoot, version, options, cancellationToken).ConfigureAwait(false);
+        await PublishProjectAsync(launcherProject, launcherRoot, repositoryRoot, version, options, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task PublishProjectAsync(
+        string project,
+        string output,
+        string repositoryRoot,
+        string version,
+        ReleaseBuildOptions options,
+        CancellationToken cancellationToken)
+    {
         await ProcessRunner.RequireAsync(
             "dotnet",
             repositoryRoot,
@@ -155,7 +209,7 @@ internal sealed class ReleasePackageBuilder
                 "--configuration", options.Configuration,
                 "--runtime", options.RuntimeIdentifier,
                 "--self-contained", "true",
-                "--output", payloadRoot,
+                "--output", output,
                 $"-p:Version={version}",
                 "-p:UseAppHost=true",
                 "-p:PublishSingleFile=false",

@@ -119,30 +119,27 @@ public sealed class LegacyInventoryCompatibilityTests
     }
 
     [Fact]
-    public async Task MalformedKnownRequirementFact_IsPreservedWithoutPartialImport()
+    public async Task MalformedKnownRequirementFact_IsPreservedAndBlocksUnknownSchema()
     {
         var root = NewRoot();
         try
         {
             await WriteAsync(root, "governance/ownership.json", "{\"schema_version\":\"3.0.0\",\"rules\":[]}");
             await WriteAsync(root, "requirements/ledger.json", "{\"schema_version\":\"1.0.0\",\"revision\":1,\"requirements\":{}}");
+            var ledger = Path.Combine(root, ".ai", "requirements", "ledger.json");
+            var beforeHash = HashFile(ledger);
 
             var migration = await RunCliAsync(root, "migrate-community");
             var result = Json(migration);
-            var import = result.GetProperty("import");
-            var projectId = import.GetProperty("project_id").GetString();
 
-            Assert.Equal(0, migration.ExitCode);
-            Assert.Equal("IMPORTED", import.GetProperty("status").GetString());
+            Assert.Equal(2, migration.ExitCode);
+            Assert.Equal("BLOCKED", result.GetProperty("status").GetString());
+            Assert.Equal("UNKNOWN_SCHEMA", result.GetProperty("project").GetProperty("reason_code").GetString());
             Assert.Contains(
-                import.GetProperty("inventory").GetProperty("entries").EnumerateArray(),
-                static item => item.GetProperty("path").GetString() == "requirements/ledger.json" &&
-                               item.GetProperty("handling").GetString() == "INVALID_FACT_SOURCE_PRESERVE_NO_IMPORT");
-            Assert.True(File.Exists(Path.Combine(root, ".ai", "state", "hiker-state.db")));
-            await using (var store = new SqliteStateStore(new ProjectLayout(root)))
-            {
-                Assert.Null(await store.ReadAsync(new StateKey(projectId!, EntityKinds.Requirement, "requirements:ledger.json")));
-            }
+                result.GetProperty("project").GetProperty("ai_content").GetProperty("unknown_items").EnumerateArray(),
+                static item => item.GetString()!.Contains("UNKNOWN_LEGACY_SCHEMA", StringComparison.Ordinal));
+            Assert.False(File.Exists(Path.Combine(root, ".ai", "state", "hiker-state.db")));
+            Assert.Equal(beforeHash, HashFile(ledger));
         }
         finally
         {

@@ -12,10 +12,13 @@ public sealed partial class SqliteStateStore
         var normalized = new StateKey(projectId, EntityKinds.Project, "legacy-finalize").Normalize().ProjectId;
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         var snapshots = await ReadLegacyRuntimeAsync(connection, transaction: null, normalized, cancellationToken).ConfigureAwait(false);
-        var receipt = await ReadOperationReceiptAsync(
-            LegacyRuntimeFinalizationFacts.OperationId(normalized),
-            cancellationToken).ConfigureAwait(false);
-        return Inspect(normalized, snapshots, receipt is not null);
+        await using var completed = connection.CreateCommand();
+        completed.CommandText = "SELECT COUNT(*) FROM operations WHERE project_id=$project AND operation_type='LEGACY_RUNTIME_FINALIZED' AND status='COMPLETE';";
+        completed.Parameters.AddWithValue("$project", normalized);
+        var completionRecorded = Convert.ToInt64(
+            await completed.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+            System.Globalization.CultureInfo.InvariantCulture) > 0;
+        return Inspect(normalized, snapshots, completionRecorded);
     }
 
     public async Task<LegacyRuntimeFinalizeResult> FinalizeLegacyRuntimeAsync(
@@ -23,7 +26,10 @@ public sealed partial class SqliteStateStore
         CancellationToken cancellationToken = default)
     {
         var projectId = new StateKey(request.ProjectId, EntityKinds.Project, "legacy-finalize").Normalize().ProjectId;
-        var expectedOperationId = LegacyRuntimeFinalizationFacts.OperationId(projectId);
+        var expectedOperationId = LegacyRuntimeFinalizationFacts.OperationId(
+            projectId,
+            request.SourceFingerprint,
+            request.MigrationGeneration);
         if (!string.Equals(request.OperationId, expectedOperationId, StringComparison.Ordinal))
         {
             throw new ArgumentException("Legacy finalization operation id does not match the project", nameof(request));

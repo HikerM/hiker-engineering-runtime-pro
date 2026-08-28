@@ -279,10 +279,12 @@ public sealed partial class SqliteStateStore : IStateStore
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT project_id,operation_type,request_fingerprint,status,generation,entity_kind,entity_id,created_at,completed_at,result_json
+            SELECT project_id,operation_type,request_fingerprint,status,generation,entity_kind,entity_id,created_at,completed_at,result_json,
+                   (SELECT payload_json FROM engineering_events WHERE event_id=$id LIMIT 1)
             FROM operations WHERE operation_id=$id
             UNION ALL
-            SELECT project_id,operation_type,request_fingerprint,status,generation,entity_kind,entity_id,created_at,completed_at,result_json
+            SELECT project_id,operation_type,request_fingerprint,status,generation,entity_kind,entity_id,created_at,completed_at,result_json,
+                   (SELECT payload_json FROM engineering_events WHERE event_id=$id LIMIT 1)
             FROM archived_operations WHERE operation_id=$id
             LIMIT 1;
             """;
@@ -293,6 +295,8 @@ public sealed partial class SqliteStateStore : IStateStore
             return null;
         }
 
+        var eventPayload = reader.IsDBNull(10) ? null : reader.GetString(10);
+        var runtimeIdentity = RuntimeIdentityFromEvent(eventPayload);
         return new OperationReceipt(
             operationId,
             reader.GetString(0),
@@ -304,7 +308,30 @@ public sealed partial class SqliteStateStore : IStateStore
             reader.GetString(6),
             DateTimeOffset.Parse(reader.GetString(7), System.Globalization.CultureInfo.InvariantCulture),
             reader.IsDBNull(8) ? null : DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture),
-            reader.IsDBNull(9) ? null : reader.GetString(9));
+            reader.IsDBNull(9) ? null : reader.GetString(9),
+            runtimeIdentity.Identity,
+            runtimeIdentity.BuildFingerprint);
+    }
+
+    private static (string? Identity, string? BuildFingerprint) RuntimeIdentityFromEvent(string? payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload)) return (null, null);
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(payload);
+            var root = document.RootElement;
+            var identity = root.TryGetProperty("runtime_identity", out var runtime) && runtime.ValueKind == System.Text.Json.JsonValueKind.String
+                ? runtime.GetString()
+                : null;
+            var fingerprint = root.TryGetProperty("build_fingerprint", out var build) && build.ValueKind == System.Text.Json.JsonValueKind.String
+                ? build.GetString()
+                : null;
+            return (identity, fingerprint);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return (null, null);
+        }
     }
 
     public async Task<long> AppendEventAsync(EngineeringEvent engineeringEvent, CancellationToken cancellationToken = default)

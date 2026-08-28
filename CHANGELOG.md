@@ -1,5 +1,22 @@
 # Changelog
 
+## 5.19.0-rc.8 — Unreleased
+
+### Added
+
+- `GA-5.19-CLI-BRIDGE-CONTRACT-001`：所有 `--json` 机器命令统一使用 `hiker-cli/v1` 单文档 Envelope，stdout 只承载主响应，stderr 只承载诊断，退出码与 Envelope 一致，并显式报告 Pro 接管状态。
+- `GA-5.19-LEGACY-AUTO-CONVERGENCE-001`：普通 `attach` 在安全边界按 Project Preflight 自动执行已知 Legacy migration、旧运行态 Finalize、Doctor 复检和 Adoption；migrate/finalize operation identity 由 Project、来源指纹、迁移 generation 与操作类型确定性生成。
+- 新增稳定 Launcher、不可变 Runtime 目录、原子活动 Pointer、版本/协议/schema 兼容门禁、回滚和 operation runtime identity；新增有界 `project-facts` 路由事实接口。
+
+### Safety
+
+- 已有 Project Identity 始终复用；半迁移的同源 Community Fact 按当前 generation 收敛，其他活动 authority 占用同一事实键时失败关闭。
+- 非权威脚本、文档和二进制原地惰性保留且不执行；疑似 State Authority、未知 Legacy schema、reparse/path escape、损坏和超出盘点预算的数据返回结构化阻断，不会被误标为安全内容。
+
+### Verification
+
+- 私有源码完整 Debug / Release Unit / Integration：201/201 PASS；Installed Field 与商业 Gate 仍须绑定 rc.8 提交重新执行。
+
 ## 5.19.0-rc.7 — Unreleased
 
 ### Added

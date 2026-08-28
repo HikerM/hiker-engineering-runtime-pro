@@ -91,7 +91,7 @@ public sealed class ProjectBootstrapService(
 
             if (content.UnknownItems.Count > 0)
             {
-                return Result(ProjectBootstrapState.RequiresReview, payload.ProjectId, IdentityAuthority, intent, content, identity, "UNKNOWN_AI_CONTENT");
+                return Result(ProjectBootstrapState.RequiresReview, payload.ProjectId, IdentityAuthority, intent, content, identity, UnknownContentReason(content.UnknownItems));
             }
 
             var importComplete = identity.CompletedCommunityImportProjectIds.Contains(payload.ProjectId, StringComparer.Ordinal);
@@ -147,7 +147,7 @@ public sealed class ProjectBootstrapService(
         {
             if (content.UnknownItems.Count > 0)
             {
-                return Result(ProjectBootstrapState.RequiresReview, recoveredId, "LEGACY_STATE_NAMESPACE", intent, content, identity, "UNKNOWN_AI_CONTENT");
+                return Result(ProjectBootstrapState.RequiresReview, recoveredId, "LEGACY_STATE_NAMESPACE", intent, content, identity, UnknownContentReason(content.UnknownItems));
             }
 
             var imported = identity.CompletedCommunityImportProjectIds.Contains(recoveredId, StringComparer.Ordinal);
@@ -169,7 +169,7 @@ public sealed class ProjectBootstrapService(
 
         if (content.UnknownItems.Count > 0)
         {
-            return Result(ProjectBootstrapState.RequiresReview, null, "NONE", intent, content, identity, "UNKNOWN_AI_CONTENT");
+            return Result(ProjectBootstrapState.RequiresReview, null, "NONE", intent, content, identity, UnknownContentReason(content.UnknownItems));
         }
 
         if (content.MigratableLegacyFacts > 0 || content.LegacyInventory.SafePreservedContent > 0)
@@ -493,6 +493,22 @@ public sealed class ProjectBootstrapService(
             .ToUpperInvariant());
 
     private static string Sha256(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+
+    private static string UnknownContentReason(IReadOnlyList<string> findings)
+    {
+        if (findings.Any(static finding => finding.Contains("POTENTIAL_STATE_AUTHORITY", StringComparison.Ordinal)))
+            return "AUTHORITY_CONFLICT";
+        if (findings.Any(static finding => finding.Contains("UNKNOWN_LEGACY_SCHEMA", StringComparison.Ordinal) ||
+                                          finding.Contains("UNTRUSTED_JSON", StringComparison.Ordinal)))
+            return "UNKNOWN_SCHEMA";
+        if (findings.Any(static finding => finding.Contains("REPARSE_POINT", StringComparison.Ordinal) ||
+                                          finding.Contains("PATH_ESCAPE", StringComparison.Ordinal) ||
+                                          finding.Contains("INVENTORY_UNREADABLE", StringComparison.Ordinal)))
+            return "CORRUPTION";
+        if (findings.Any(static finding => finding.Contains("INVENTORY_LIMIT_EXCEEDED", StringComparison.Ordinal)))
+            return "INVENTORY_LIMIT_EXCEEDED";
+        return "UNKNOWN_REQUIRES_REVIEW";
+    }
 
     private sealed record IdentityPayloadValue(
         string ProjectId,

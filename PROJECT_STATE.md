@@ -1,6 +1,6 @@
 # Hiker 5.19 Pro Project State
 
-- Product: `5.19.0-rc.7`
+- Product: `5.19.0-rc.8`
 - Runtime: `0.1.0`
 - State Schema: `3.0.0`
 - Release branch requirement: `main`
@@ -8,14 +8,14 @@
 - Visibility requirement: `PRIVATE`
 - Phase: `COMMERCIAL_RELEASE_CANDIDATE`
 - Field proof: `NOT_YET_FIELD_PROVEN`
-- Active release blocker: rc.7 仍需完成原长期 Codex 任务的安全边界 Live Adoption Field 验收，并在干净且与 `origin/main` 一致的发布提交上重建签名 ZIP、完整证据和商业 Gate；当前功能分支证据不能替代正式发布 Gate。
+- Active release blocker: rc.8 仍需在原长期 Codex 任务的自然安全边界完成 Community Bridge → Pro Runtime 的 Installed Field 验收，并在干净且与 `origin/main` 一致的发布提交上重建签名 ZIP、完整证据和商业 Gate；当前功能分支和 Fixture 证据不能替代正式发布 Gate。
 
 本文件记录候选身份，不静态宣称发布 Gate 已通过。最终状态必须读取同一源码提交生成的本地 `artifacts/verification/commercial-release-gate.json`；该文件被 Git 忽略，避免把机器路径、运行时间或一次性签名证据提交到源码历史。
 
 发布候选必须同时满足：
 
 - 当前 `main` 与 `origin/main` HEAD 一致且工作区干净；
-- Public Community 5.18 基线保持 `05e94e32af719c81f740fe2af08c35f98a527588`；
+- Public Community 5.18 基线保持 `8a612eb499c57be6a2c7da4d6dfd11d97d6c599d`；
 - Unit / Integration、加速老化、大仓库、真实服务、真实数据库、真实 Codex Runtime 与商业 Gate 全部绑定当前提交；
 - RC ZIP 通过外部 SHA-256、独立信任根、签名 Manifest、逐文件 Hash、隐私、Clean Install 与 Tamper Gate；
 - COMM-G1–G17 全部 PASS；

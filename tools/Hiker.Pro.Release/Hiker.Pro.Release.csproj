@@ -5,6 +5,7 @@
     <RootNamespace>Hiker.Pro.ReleaseTool</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Hiker.Pro.Activation/Hiker.Pro.Activation.csproj" />
     <ProjectReference Include="../../src/Hiker.Pro.Runtime/Hiker.Pro.Runtime.csproj" />
   </ItemGroup>
 </Project>

@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Hiker.Pro.Release;
 
 namespace Hiker.Pro.State;
 
@@ -170,7 +171,7 @@ public sealed partial class SqliteStateStore
         command.Parameters.AddWithValue("$entity", (object?)engineeringEvent.EntityId ?? DBNull.Value);
         command.Parameters.AddWithValue("$generation", engineeringEvent.Generation);
         command.Parameters.AddWithValue("$summary", engineeringEvent.SummaryCode);
-        command.Parameters.AddWithValue("$payload", engineeringEvent.PayloadJson);
+        command.Parameters.AddWithValue("$payload", RuntimeExecutionIdentity.Current.EnrichEventPayload(engineeringEvent.PayloadJson));
         command.Parameters.AddWithValue("$at", engineeringEvent.OccurredAt.ToString("O"));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }

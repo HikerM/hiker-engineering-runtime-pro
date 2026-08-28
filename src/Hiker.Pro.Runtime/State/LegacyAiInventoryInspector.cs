@@ -104,7 +104,8 @@ internal static class LegacyAiInventoryInspector
         var directory = layout.ResolveAiRelativePath(relativeDirectory);
         if (IsReparsePoint(directory))
         {
-            entries.Add(IsolatedEntry(relativeDirectory, "REPARSE_POINT", "NO_FOLLOW_SOURCE_PRESERVE_ONLY"));
+            AddUnknown(unknown, $"{relativeDirectory}:REPARSE_POINT");
+            entries.Add(UnknownEntry(relativeDirectory, "REPARSE_POINT", "NO_FOLLOW_BLOCKED"));
             return 0;
         }
 
@@ -122,14 +123,16 @@ internal static class LegacyAiInventoryInspector
                     scanned++;
                     if (scanned > MaxFiles)
                     {
-                        entries.Add(IsolatedEntry(relativeDirectory, "INVENTORY_LIMIT_EXCEEDED", "BOUNDED_SCAN_SOURCE_PRESERVE_ONLY"));
+                        AddUnknown(unknown, $"{relativeDirectory}:INVENTORY_LIMIT_EXCEEDED:{MaxFiles}");
+                        entries.Add(UnknownEntry(relativeDirectory, "INVENTORY_LIMIT_EXCEEDED", "BOUNDED_SCAN_BLOCKED"));
                         break;
                     }
 
                     var relative = Path.GetRelativePath(layout.AiRoot, item).Replace('\\', '/');
                     if (IsReparsePoint(item))
                     {
-                        entries.Add(IsolatedEntry(relative, "REPARSE_POINT", "NO_FOLLOW_SOURCE_PRESERVE_ONLY"));
+                        AddUnknown(unknown, $"{relative}:REPARSE_POINT");
+                        entries.Add(UnknownEntry(relative, "REPARSE_POINT", "NO_FOLLOW_BLOCKED"));
                         continue;
                     }
 
@@ -137,7 +140,7 @@ internal static class LegacyAiInventoryInspector
                     {
                         fingerprintItems.Add($"D\0{relative}");
                         if (directoryPolicy.OpaquePreserved) pending.Push(item);
-                        else PreserveUncatalogued(layout, item, relative, entries, fingerprintItems);
+                        else PreserveUncatalogued(layout, item, relative, entries, unknown, fingerprintItems);
                         continue;
                     }
 
@@ -146,7 +149,11 @@ internal static class LegacyAiInventoryInspector
                     if (Community518SourceCatalog.TryResolve(relative, item, out var source))
                     {
                         if (Community518SourceCatalog.TryValidate(source, out var reason)) count++;
-                        else entries.Add(IsolatedEntry(relative, $"INVALID_LEGACY_FORMAT:{reason}", "INVALID_FACT_SOURCE_PRESERVE_NO_IMPORT"));
+                        else
+                        {
+                            AddUnknown(unknown, $"{relative}:UNKNOWN_LEGACY_SCHEMA:{reason}");
+                            entries.Add(UnknownEntry(relative, $"UNKNOWN_LEGACY_SCHEMA:{reason}", "INVALID_FACT_SOURCE_BLOCKED"));
+                        }
                         continue;
                     }
 
@@ -158,17 +165,18 @@ internal static class LegacyAiInventoryInspector
 
                     if (!directoryPolicy.OpaquePreserved)
                     {
-                        PreserveUncatalogued(layout, item, relative, entries, fingerprintItems);
+                        PreserveUncatalogued(layout, item, relative, entries, unknown, fingerprintItems);
                     }
                 }
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            entries.Add(IsolatedEntry(
+            AddUnknown(unknown, $"{relativeDirectory}:INVENTORY_UNREADABLE:{exception.GetType().Name.ToUpperInvariant()}");
+            entries.Add(UnknownEntry(
                 relativeDirectory,
                 $"INVENTORY_UNREADABLE:{exception.GetType().Name.ToUpperInvariant()}",
-                "UNREADABLE_SOURCE_PRESERVE_NO_IMPORT"));
+                "UNREADABLE_SOURCE_BLOCKED"));
         }
 
         return count;
@@ -201,10 +209,11 @@ internal static class LegacyAiInventoryInspector
                 continue;
             }
 
-            entries.Add(IsolatedEntry(
+            foreach (var finding in inspection.Findings) AddUnknown(unknown, finding);
+            entries.Add(UnknownEntry(
                 name,
                 string.Join('|', inspection.Findings),
-                "INERT_SOURCE_PRESERVE_NO_IMPORT_NO_EXECUTE"));
+                "UNTRUSTED_AUTHORITY_OR_PATH_BLOCKED"));
         }
     }
 
@@ -213,27 +222,34 @@ internal static class LegacyAiInventoryInspector
         string item,
         string relative,
         List<LegacyInventoryEntry> entries,
+        List<string> unknown,
         List<string> fingerprintItems)
     {
         var inspection = LegacyUntrustedContentInspector.Inspect(layout, item);
         fingerprintItems.AddRange(inspection.FingerprintItems);
-        entries.Add(inspection.SafeToPreserve
-            ? new LegacyInventoryEntry(
+        if (inspection.SafeToPreserve)
+        {
+            entries.Add(new LegacyInventoryEntry(
                 relative,
                 "PRESERVED_UNTRUSTED_LEGACY_CONTENT",
                 new[] { LegacyInventoryClassifications.SafePreservedContent },
                 "UNTRUSTED_LAZY_SOURCE_PRESERVE_ONLY",
-                0)
-            : IsolatedEntry(
+                0));
+        }
+        else
+        {
+            foreach (var finding in inspection.Findings) AddUnknown(unknown, finding);
+            entries.Add(UnknownEntry(
                 relative,
                 string.Join('|', inspection.Findings),
-                "INERT_SOURCE_PRESERVE_NO_IMPORT_NO_EXECUTE"));
+                "UNTRUSTED_AUTHORITY_OR_PATH_BLOCKED"));
+        }
     }
 
-    private static LegacyInventoryEntry IsolatedEntry(string path, string reason, string handling) => new(
+    private static LegacyInventoryEntry UnknownEntry(string path, string reason, string handling) => new(
         path,
         $"ISOLATED_UNTRUSTED_LEGACY_CONTENT:{reason}",
-        new[] { LegacyInventoryClassifications.SafePreservedContent },
+        new[] { LegacyInventoryClassifications.UnknownRequiresReview },
         handling,
         0);
 

@@ -74,11 +74,25 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
             aggregateHash.AppendData(Encoding.UTF8.GetBytes($"{relative}\0{sourceHash}\n"));
             var entityId = EntityId(relative, payload);
             var key = new StateKey(normalizedProject, source.Kind, entityId);
+            var snapshot = await state.ReadForReasoningAsync(key, cancellationToken).ConfigureAwait(false);
+            if (snapshot.State is { } existing &&
+                existing.Lifecycle is StateLifecycle.Valid or StateLifecycle.Stale &&
+                !string.Equals(existing.Authority, LegacyRuntimeFinalizationFacts.Authority, StringComparison.Ordinal))
+            {
+                rejected.Add($"{relative}:AUTHORITY_CONFLICT:{existing.Authority}");
+                continue;
+            }
+
             var request = new TransactionRequest(
-                $"community-5.18-{Sha256(relative)[..24]}",
+                LegacyOperationIdentity.Create(
+                    "COMMUNITY_IMPORT_FACT",
+                    normalizedProject,
+                    sourceHash,
+                    marker?.Generation ?? 0,
+                    relative),
                 new StateMutation(
                     key,
-                    0,
+                    snapshot.State?.Generation ?? 0,
                     GoalRevision(payload),
                     source.Lifecycle,
                     "COMMUNITY_5_18_IMPORT",
@@ -90,7 +104,6 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
                 "COMMUNITY_STATE_IMPORTED",
                 "COMMUNITY_5_18_IMPORT",
                 JsonSerializer.Serialize(new { source_ref = $".ai/{relative}", semantic_type = source.SemanticType }));
-            var snapshot = await state.ReadForReasoningAsync(key, cancellationToken).ConfigureAwait(false);
             var result = await state.CommitAsync(
                 snapshot,
                 request.OperationId,
@@ -141,7 +154,11 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
         var markerSnapshot = await state.ReadForReasoningAsync(markerKey, cancellationToken).ConfigureAwait(false);
         var markerResult = await state.CommitAsync(
             markerSnapshot,
-            $"community-5.18-complete-{aggregate[..24]}",
+            LegacyOperationIdentity.Create(
+                "COMMUNITY_IMPORT_COMPLETE",
+                normalizedProject,
+                aggregate,
+                markerSnapshot.State?.Generation ?? 0),
             new StateMutation(markerKey, 0, 0, StateLifecycle.Valid, "STATE_COORDINATOR", SqliteSchema.CurrentVersion, aggregate, aggregate, markerPayload),
             "COMMUNITY_IMPORT_COMPLETED",
             "COMMUNITY_5_18_IMPORT_COMPLETE",

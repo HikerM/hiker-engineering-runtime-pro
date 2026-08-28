@@ -40,47 +40,42 @@ internal sealed class LiveAdoptionProjectBootstrap(
             bootstrapResult = await bootstrap.MigrateCommunityAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
-        var active = await bootstrap.PreflightAsync(ProjectBootstrapIntent.Read, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var active = await bootstrap.PreflightAsync(ProjectBootstrapIntent.Recovery, cancellationToken: cancellationToken).ConfigureAwait(false);
         var projectId = active.ProjectId ?? bootstrapResult?.ProjectId;
         if (!active.CanProceed || projectId is null)
         {
             return active;
         }
 
-        var finalizationOperation = LegacyRuntimeFinalizationFacts.OperationId(projectId);
-        var finalizationReceipt = await store.ReadOperationReceiptAsync(finalizationOperation, cancellationToken).ConfigureAwait(false);
-        if (finalizationReceipt is null)
+        var inspection = await store.InspectLegacyRuntimeAsync(projectId, cancellationToken).ConfigureAwait(false);
+        if (inspection.RequiresReview > 0)
         {
-            var inspection = await store.InspectLegacyRuntimeAsync(projectId, cancellationToken).ConfigureAwait(false);
-            if (inspection.RequiresReview > 0)
+            return active with
+            {
+                State = ProjectBootstrapState.RequiresReview,
+                Status = "BLOCKED",
+                CanProceed = false,
+                ReasonCode = "UNKNOWN_LEGACY_RUNTIME_AUTHORITY"
+            };
+        }
+
+        if (inspection.Finalizable > 0)
+        {
+            var finalized = await new LegacyRuntimeFinalizationService(
+                layout,
+                store,
+                coordinator,
+                bootstrap,
+                processProbe).FinalizeAsync(projectId, cancellationToken).ConfigureAwait(false);
+            if (finalized.Status is not "FINALIZED" and not "ALREADY_FINALIZED")
             {
                 return active with
                 {
                     State = ProjectBootstrapState.RequiresReview,
                     Status = "BLOCKED",
                     CanProceed = false,
-                    ReasonCode = "UNKNOWN_LEGACY_RUNTIME_AUTHORITY"
+                    ReasonCode = finalized.ReasonCode
                 };
-            }
-
-            if (inspection.Finalizable > 0)
-            {
-                var finalized = await new LegacyRuntimeFinalizationService(
-                    layout,
-                    store,
-                    coordinator,
-                    bootstrap,
-                    processProbe).FinalizeAsync(projectId, cancellationToken).ConfigureAwait(false);
-                if (finalized.Status is not "FINALIZED" and not "ALREADY_FINALIZED")
-                {
-                    return active with
-                    {
-                        State = ProjectBootstrapState.RequiresReview,
-                        Status = "BLOCKED",
-                        CanProceed = false,
-                        ReasonCode = finalized.ReasonCode
-                    };
-                }
             }
         }
 

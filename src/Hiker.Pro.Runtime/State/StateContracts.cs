@@ -169,7 +169,9 @@ public sealed record OperationReceipt(
     string EntityId,
     DateTimeOffset CreatedAt,
     DateTimeOffset? CompletedAt,
-    string? ResultJson);
+    string? ResultJson,
+    string? RuntimeIdentity = null,
+    string? BuildFingerprint = null);
 
 public sealed record InvalidationRequest(
     string OperationId,

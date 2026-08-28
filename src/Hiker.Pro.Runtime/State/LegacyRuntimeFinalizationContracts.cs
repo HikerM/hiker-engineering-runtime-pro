@@ -22,12 +22,8 @@ public static class LegacyRuntimeFinalizationFacts
         },
         StringComparer.Ordinal);
 
-    public static string OperationId(string projectId)
-    {
-        var normalized = new StateKey(projectId, EntityKinds.Project, "legacy-finalize").Normalize().ProjectId;
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant();
-        return $"legacy-runtime-finalize-{hash[..24]}";
-    }
+    public static string OperationId(string projectId, string sourceFingerprint, long migrationGeneration) =>
+        LegacyOperationIdentity.Create("RUNTIME_FINALIZE", projectId, sourceFingerprint, migrationGeneration);
 }
 
 public sealed record LegacyRuntimeInspection(
@@ -49,7 +45,11 @@ public sealed record LegacyRuntimeFactReference(
     public string Description => $"{Kind}/{EntityId}:schema={SchemaVersion}:lifecycle={Lifecycle}";
 }
 
-public sealed record LegacyRuntimeFinalizeRequest(string OperationId, string ProjectId);
+public sealed record LegacyRuntimeFinalizeRequest(
+    string OperationId,
+    string ProjectId,
+    string SourceFingerprint,
+    long MigrationGeneration);
 
 public sealed record LegacyRuntimeFinalizeResult(
     string Status,

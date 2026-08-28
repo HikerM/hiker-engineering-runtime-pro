@@ -9,8 +9,11 @@ using Hiker.Pro.Storage;
 
 internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions json)
 {
+    private string command = "unknown";
+
     public async Task<int> RunAsync(string[] args)
     {
+        command = args[0];
         var layout = new ProjectLayout(root);
         await using var store = new SqliteStateStore(layout);
         var state = new StateCoordinator(store);
@@ -65,6 +68,13 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
                     var ok = health.Status != "BLOCKED" && environment?.Status != "BLOCKED";
                     Write(new { ok, project = active, health, storage, environment, metrics });
                     return ok ? 0 : 2;
+                }
+            case "project-facts":
+                {
+                    var active = await bootstrap.RequireActiveAsync(ProjectBootstrapIntent.Read, suppliedProjectId).ConfigureAwait(false);
+                    var facts = await new ProjectRoutingFactsService(store).ReadAsync(active).ConfigureAwait(false);
+                    Write(new { ok = true, status = facts.Status, facts });
+                    return 0;
                 }
             case "backup":
                 {
@@ -257,6 +267,9 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
                 }
             case "migrate-community":
                 {
+                    var generationBefore = File.Exists(layout.DatabasePath)
+                        ? (await store.GetMetricsAsync().ConfigureAwait(false)).Generation
+                        : 0;
                     var before = await bootstrap.PreflightAsync(ProjectBootstrapIntent.MigrateCommunity, suppliedProjectId).ConfigureAwait(false);
                     if (!before.CanProceed) throw new ProjectBootstrapException(before);
                     StateBackupResult? backup = null;
@@ -266,11 +279,20 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
                     }
 
                     var result = await bootstrap.MigrateCommunityAsync(suppliedProjectId).ConfigureAwait(false);
-                    Write(new { import = result.Import, project = result, pre_import_backup = backup });
+                    var metricsAfter = await store.GetMetricsAsync().ConfigureAwait(false);
+                    Write(new
+                    {
+                        import = result.Import,
+                        project = result,
+                        pre_import_backup = backup,
+                        operation_status = result.Status == "ALREADY_IMPORTED" ? "ALREADY_COMPLETED" : "COMPLETE",
+                        state_writes = Math.Max(0, metricsAfter.Generation - generationBefore)
+                    });
                     return result.Status is "IMPORTED" or "ALREADY_IMPORTED" or "REUSED" ? 0 : 2;
                 }
             case "finalize-legacy":
                 {
+                    var metricsBefore = await store.GetMetricsAsync().ConfigureAwait(false);
                     var result = await new LegacyRuntimeFinalizationService(
                         layout,
                         store,
@@ -278,6 +300,7 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
                         bootstrap,
                         new ProcessIdentityProbe()).FinalizeAsync(suppliedProjectId).ConfigureAwait(false);
                     var project = await bootstrap.PreflightAsync(ProjectBootstrapIntent.Read, suppliedProjectId).ConfigureAwait(false);
+                    var metricsAfter = await store.GetMetricsAsync().ConfigureAwait(false);
                     var ok = result.Status is "FINALIZED" or "ALREADY_FINALIZED" &&
                              result.Health.Status == "HEALTHY" &&
                              project.CanProceed;
@@ -291,6 +314,8 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
                         result.Backup,
                         result.Finalization,
                         result.Health,
+                        operation_status = result.Status == "ALREADY_FINALIZED" ? "ALREADY_COMPLETED" : "COMPLETE",
+                        state_writes = Math.Max(0, metricsAfter.Generation - metricsBefore.Generation),
                         project
                     });
                     return ok ? 0 : 2;
@@ -303,12 +328,13 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
                     return 0;
                 }
             default:
-                Console.Error.WriteLine($"Unknown command: {args[0]}");
-                return 2;
+                Write(new { ok = false, status = "USAGE_ERROR", message = $"Unknown command: {args[0]}" }, CliExitCodes.Usage);
+                return CliExitCodes.Usage;
         }
     }
 
-    private void Write<T>(T value) => Console.WriteLine(JsonSerializer.Serialize(value, json));
+    private void Write<T>(T value, int? exitCode = null) =>
+        CliMachineContract.WritePayload(Console.Out, json, command, value, exitCode);
 
     private static string? ValueAfter(string[] values, string name)
     {
