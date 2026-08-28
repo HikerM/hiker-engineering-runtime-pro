@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using Hiker.Pro.Activation;
+using Hiker.Pro.State;
 using Xunit;
 
 namespace Hiker.Pro.Tests;
@@ -237,6 +238,73 @@ public sealed class RuntimeActivationTests
         {
             if (Directory.Exists(home)) Directory.Delete(home, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task UpgradePreservesProjectGoalTaskCheckpointAndDoesNotDuplicateRuntimeEntities()
+    {
+        await using var project = await TestProject.CreateAsync("project-runtime-continuity");
+        var identities = new[]
+        {
+            (EntityKinds.Goal, "goal-current", StateLifecycle.Valid),
+            (EntityKinds.Task, "task-current", StateLifecycle.Valid),
+            (EntityKinds.Checkpoint, "checkpoint-current", StateLifecycle.Valid),
+            (EntityKinds.Agent, "agent-current", StateLifecycle.Valid),
+            (EntityKinds.ProviderSessionBinding, "binding-current", StateLifecycle.Valid),
+            (EntityKinds.Worktree, "worktree-current", StateLifecycle.Valid),
+            (EntityKinds.RuntimeLease, "lease-old", StateLifecycle.Archived)
+        };
+        var mutations = identities.Select(item => new StateMutation(
+            new StateKey(project.ProjectId!, item.Item1, item.Item2),
+            0,
+            7,
+            item.Item3,
+            "RUNTIME_CONTINUITY_FIXTURE",
+            "3.0.0",
+            $"source-{item.Item1}-{item.Item2}",
+            $"dependency-{item.Item1}-{item.Item2}",
+            $"{{\"id\":\"{item.Item2}\",\"status\":\"{item.Item3}\"}}",
+            item.Item1 == EntityKinds.Checkpoint ? RetentionTier.Warm : RetentionTier.Hot)).ToArray();
+        var seeded = await project.Coordinator.CommitBatchAsync(new BatchTransactionRequest(
+            "runtime-continuity-seed",
+            mutations,
+            "RUNTIME_CONTINUITY_SEEDED",
+            "RUNTIME_CONTINUITY_FIXTURE",
+            "{}"));
+        Assert.True(seeded.Committed, seeded.Status);
+        var before = new Dictionary<StateKey, StateSnapshot>();
+        foreach (var mutation in mutations)
+            before[mutation.Key] = Assert.IsType<StateSnapshot>(await project.Store.ReadAsync(mutation.Key));
+        var generationBefore = (await project.Store.GetMetricsAsync()).Generation;
+
+        var fixture = await Fixture.CreateAsync();
+        try
+        {
+            await fixture.ActivateAsync("runtime-a", "5.19.0-rc.7", CommitA);
+            await fixture.ActivateAsync("runtime-b", "5.19.0-rc.8", CommitB);
+        }
+        finally
+        {
+            fixture.Dispose();
+        }
+
+        Assert.Equal(generationBefore, (await project.Store.GetMetricsAsync()).Generation);
+        foreach (var item in before)
+        {
+            var after = Assert.IsType<StateSnapshot>(await project.Store.ReadAsync(item.Key));
+            Assert.Equal(item.Value.Generation, after.Generation);
+            Assert.Equal(item.Value.GoalRevision, after.GoalRevision);
+            Assert.Equal(item.Value.Lifecycle, after.Lifecycle);
+            Assert.Equal(item.Value.Authority, after.Authority);
+            Assert.Equal(item.Value.SchemaVersion, after.SchemaVersion);
+            Assert.Equal(item.Value.PayloadJson, after.PayloadJson);
+            Assert.Equal(item.Value.SourceFingerprint, after.SourceFingerprint);
+            Assert.Equal(item.Value.DependencyFingerprint, after.DependencyFingerprint);
+            Assert.Equal(item.Value.Retention, after.Retention);
+        }
+        foreach (var kind in new[] { EntityKinds.Agent, EntityKinds.ProviderSessionBinding, EntityKinds.Worktree, EntityKinds.RuntimeLease })
+            Assert.Single(await project.Store.ReadAsync(project.ProjectId!, kind, lifecycle: null, limit: 8));
+        Assert.Equal(StateLifecycle.Archived, (await project.Store.ReadAsync(new StateKey(project.ProjectId!, EntityKinds.RuntimeLease, "lease-old")))!.Lifecycle);
     }
 
     private sealed class Fixture : IDisposable
