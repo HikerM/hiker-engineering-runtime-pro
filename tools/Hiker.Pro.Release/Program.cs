@@ -4,7 +4,7 @@ using Hiker.Pro.ReleaseTool;
 var json = new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true };
 if (args.Length == 0 || args[0] is "help" or "--help" or "-h")
 {
-    Console.WriteLine("hiker-pro-release <version-check|build|verify|gate> [options]");
+    Console.WriteLine("hiker-pro-release <version-check|build|verify|install|runtime-rollback|gate> [options]");
     return 0;
 }
 
@@ -49,6 +49,35 @@ try
                 var result = await new ReleasePackageVerifier().VerifyAsync(options).ConfigureAwait(false);
                 Console.WriteLine(JsonSerializer.Serialize(result, json));
                 return result.Status == "PASS" ? 0 : 2;
+            }
+        case "install":
+            {
+                var options = new ReleaseInstallOptions(
+                    Required("--package"),
+                    Required("--public-key"),
+                    Required("--key-id"),
+                    Required("--public-key-sha256"),
+                    Path.GetFullPath(Required("--home")),
+                    ValueAfter("--locator"),
+                    args.Contains("--update-user-path", StringComparer.Ordinal));
+                var result = await new ReleaseRuntimeInstaller().InstallAsync(options).ConfigureAwait(false);
+                Console.WriteLine(JsonSerializer.Serialize(result, json));
+                return result.Ok ? 0 : 2;
+            }
+        case "runtime-rollback":
+            {
+                var home = Path.GetFullPath(Required("--home"));
+                var result = await new Hiker.Pro.Activation.RuntimeActivationManager(home, new Hiker.Pro.Activation.ProcessRuntimePackageProbe())
+                    .RollbackAsync().ConfigureAwait(false);
+                Console.WriteLine(JsonSerializer.Serialize(new
+                {
+                    status = result.Status,
+                    active_runtime = result.Pointer.ActiveRuntime,
+                    previous_runtime = result.Pointer.PreviousRuntime,
+                    install_generation = result.Pointer.InstallGeneration,
+                    runtime_directory = result.RuntimeDirectory
+                }, json));
+                return 0;
             }
         case "gate":
             {

@@ -31,6 +31,7 @@ public sealed class RuntimeActivationManager(string hikerHome, IRuntimePackagePr
         {
             var existing = await ReadIdentityAsync(target, cancellationToken).ConfigureAwait(false);
             if (!Equals(existing, package.Identity)) throw new IOException("Immutable runtime directory already contains different content");
+            await VerifyDirectoryHashesAsync(target, package.FileSha256, files, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -94,8 +95,10 @@ public sealed class RuntimeActivationManager(string hikerHome, IRuntimePackagePr
 
     private static void ValidatePackageFacts(VerifiedRuntimePackage package)
     {
-        if (!string.Equals(package.PackageVerificationStatus, "VERIFIED", StringComparison.Ordinal) ||
-            !string.Equals(package.EntitlementVerificationStatus, "VERIFIED", StringComparison.Ordinal))
+        var entitlementAccepted = string.Equals(package.EntitlementVerificationStatus, "VERIFIED", StringComparison.Ordinal) ||
+                                  string.Equals(package.Identity.Channel, "rc", StringComparison.Ordinal) &&
+                                  string.Equals(package.EntitlementVerificationStatus, "NOT_CONFIGURED_RC", StringComparison.Ordinal);
+        if (!string.Equals(package.PackageVerificationStatus, "VERIFIED", StringComparison.Ordinal) || !entitlementAccepted)
             throw new InvalidDataException("Unverified runtime package cannot be activated");
         if (!RuntimePathPolicy.IsSafeToken(package.Identity.RuntimeIdentityValue) ||
             package.Identity.BuildCommit.Length != 40 || !package.Identity.BuildCommit.All(Uri.IsHexDigit))
@@ -151,13 +154,22 @@ public sealed class RuntimeActivationManager(string hikerHome, IRuntimePackagePr
     }
 
     private static async Task VerifyHashesAsync(VerifiedRuntimePackage package, IReadOnlyList<string> files, CancellationToken cancellationToken)
+        => await VerifyDirectoryHashesAsync(package.StagingDirectory, package.FileSha256, files, cancellationToken).ConfigureAwait(false);
+
+    private static async Task VerifyDirectoryHashesAsync(
+        string root,
+        IReadOnlyDictionary<string, string> expectedHashes,
+        IReadOnlyList<string> files,
+        CancellationToken cancellationToken)
     {
-        if (package.FileSha256.Count != files.Count) throw new InvalidDataException("Runtime package hash inventory is incomplete");
+        if (expectedHashes.Count != files.Count) throw new InvalidDataException("Runtime package hash inventory is incomplete");
         foreach (var relative in files)
         {
-            if (!package.FileSha256.TryGetValue(relative, out var expected) || expected.Length != 64 || !expected.All(Uri.IsHexDigit))
+            if (!expectedHashes.TryGetValue(relative, out var expected) || expected.Length != 64 || !expected.All(Uri.IsHexDigit))
                 throw new InvalidDataException($"Runtime package hash is missing: {relative}");
-            await using var stream = File.OpenRead(Path.Combine(package.StagingDirectory, relative.Replace('/', Path.DirectorySeparatorChar)));
+            var path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(path)) throw new InvalidDataException($"Runtime package file is missing: {relative}");
+            await using var stream = File.OpenRead(path);
             var actual = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false)).ToLowerInvariant();
             if (!CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(expected.ToLowerInvariant()), Encoding.ASCII.GetBytes(actual)))
                 throw new InvalidDataException($"Runtime package hash mismatch: {relative}");

@@ -9,6 +9,8 @@ namespace Hiker.Pro.ReleaseTool;
 
 internal sealed class ReleasePackageVerifier
 {
+    private const int MaxArchiveEntries = 20_000;
+    private const long MaxArchiveBytes = 4L * 1024 * 1024 * 1024;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     public async Task<ReleaseVerificationResult> VerifyAsync(
@@ -129,12 +131,18 @@ internal sealed class ReleasePackageVerifier
             new Dictionary<string, object?> { ["sha256"] = actual, ["sidecar_present"] = expected is not null });
     }
 
-    private static void ExtractSafely(string package, string extraction)
+    internal static void ExtractSafely(string package, string extraction)
     {
         using var archive = ZipFile.OpenRead(package);
+        if (archive.Entries.Count > MaxArchiveEntries) throw new InvalidDataException("Release archive exceeds the entry budget");
+        long uncompressedBytes = 0;
         foreach (var entry in archive.Entries)
         {
             if (string.IsNullOrEmpty(entry.Name)) continue;
+            uncompressedBytes = checked(uncompressedBytes + entry.Length);
+            if (uncompressedBytes > MaxArchiveBytes) throw new InvalidDataException("Release archive exceeds the uncompressed byte budget");
+            var unixMode = (entry.ExternalAttributes >> 16) & 0xF000;
+            if (unixMode == 0xA000) throw new InvalidDataException("Release archive contains a symbolic link");
             if (Path.IsPathRooted(entry.FullName)) throw new InvalidDataException("Release archive contains a rooted entry");
             var target = Path.GetFullPath(Path.Combine(extraction, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
             var relative = Path.GetRelativePath(extraction, target);
@@ -200,6 +208,8 @@ internal sealed class ReleasePackageVerifier
             ? Path.Combine(payload, "missing-runtime")
             : Path.Combine(payload, "runtimes", pointer.ActiveRuntime);
         var launcherRoot = Path.Combine(payload, "bin");
+        var compatibilityLauncher = Path.Combine(payload, "compat", "hiker.exe");
+        var installer = Path.Combine(payload, "tools", "hiker-pro-release.exe");
         var required = new[]
         {
             "hiker.exe",
@@ -217,7 +227,9 @@ internal sealed class ReleasePackageVerifier
                                  IsFrameworkDependent(Path.Combine(launcherRoot, "hiker.runtimeconfig.json"));
         var runtimeFiles = Directory.Exists(runtimeRoot) ? Directory.EnumerateFiles(runtimeRoot, "*", SearchOption.TopDirectoryOnly).Count() : 0;
         var launcherFiles = Directory.Exists(launcherRoot) ? Directory.EnumerateFiles(launcherRoot, "*", SearchOption.TopDirectoryOnly).Count() : 0;
-        var pass = pointer is not null && missingRuntime.Length == 0 && missingLauncher.Length == 0 && !frameworkDependent && runtimeFiles >= 50 && launcherFiles >= 50;
+        var pass = pointer is not null && missingRuntime.Length == 0 && missingLauncher.Length == 0 &&
+                   File.Exists(compatibilityLauncher) && File.Exists(installer) &&
+                   !frameworkDependent && runtimeFiles >= 50 && launcherFiles >= 50;
         return new ReleaseGateCheck(
             "SELF_CONTAINED_RUNTIME",
             pass ? "PASS" : "BLOCKED",
@@ -229,6 +241,8 @@ internal sealed class ReleasePackageVerifier
                 ["framework_dependent"] = frameworkDependent,
                 ["runtime_file_count"] = runtimeFiles,
                 ["launcher_file_count"] = launcherFiles,
+                ["compatibility_launcher_present"] = File.Exists(compatibilityLauncher),
+                ["installer_present"] = File.Exists(installer),
                 ["active_runtime"] = pointer?.ActiveRuntime
             });
     }
@@ -309,7 +323,10 @@ internal sealed class ReleasePackageVerifier
         PackageIntegrityVerifier verifier,
         CancellationToken cancellationToken)
     {
-        var payloadPath = Directory.EnumerateFiles(Path.Combine(extraction, "payload"), "*.dll", SearchOption.TopDirectoryOnly).OrderBy(static value => value, StringComparer.Ordinal).First();
+        var payloadPath = Directory.EnumerateFiles(Path.Combine(extraction, "payload", "runtimes"), "*.dll", SearchOption.AllDirectories)
+            .OrderBy(static value => value, StringComparer.Ordinal)
+            .First();
+        var tamperedRelative = Path.GetRelativePath(extraction, payloadPath).Replace(Path.DirectorySeparatorChar, '/');
         await using (var stream = new FileStream(payloadPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
             var original = stream.ReadByte();
@@ -323,10 +340,11 @@ internal sealed class ReleasePackageVerifier
             envelope,
             extraction,
             cancellationToken,
-            new HashSet<string>(new[] { "manifest.json" }, StringComparer.Ordinal)).ConfigureAwait(false);
+            new HashSet<string>(new[] { "manifest.json", "payload/state/runtime-use.lock" }, StringComparer.Ordinal)).ConfigureAwait(false);
+        var tamperDetected = result.Failures.Any(failure => string.Equals(failure, $"{tamperedRelative}:HASH_MISMATCH", StringComparison.Ordinal));
         return new ReleaseGateCheck(
             "PACKAGE_TAMPER_REJECTION",
-            result.Status == "BLOCKED" ? "PASS" : "BLOCKED",
+            result.Status == "BLOCKED" && tamperDetected ? "PASS" : "BLOCKED",
             "A byte-level mutation of a packaged assembly was rejected by the signed artifact manifest",
             new Dictionary<string, object?> { ["verification_status"] = result.Status, ["failures"] = result.Failures });
     }

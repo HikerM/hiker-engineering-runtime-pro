@@ -12,6 +12,47 @@ namespace Hiker.Pro.Tests;
 public sealed class StableLauncherProcessTests
 {
     [Fact]
+    public async Task RootCompatibilityLauncherResolvesHomeWithoutEnvironmentOverride()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var repository = FindRepositoryRoot();
+        var configuration = AppContext.BaseDirectory.Contains($"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+            ? "Release"
+            : "Debug";
+        var home = Path.Combine(Path.GetTempPath(), $"hiker-root-launcher-{Guid.NewGuid():N}");
+        var staging = Path.Combine(home, "incoming", ".staging-runtime");
+        try
+        {
+            CopyDirectory(Path.Combine(repository, "src", "Hiker.Pro.Launcher", "bin", configuration, "net9.0"), home);
+            CopyDirectory(Path.Combine(repository, "src", "Hiker.Pro.Cli", "bin", configuration, "net9.0"), staging);
+            var identity = new RuntimeIdentity(
+                BuildVersionFacts.Current.Product,
+                BuildVersionFacts.Current.Runtime,
+                BuildVersionFacts.Current.StateSchema,
+                LiveAdoptionProtocol.CurrentVersion,
+                "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "root-compat-runtime",
+                "field");
+            await new RuntimeActivationManager(home, new ProcessRuntimePackageProbe()).ActivateAsync(new VerifiedRuntimePackage(
+                staging,
+                identity,
+                await HashesAsync(staging),
+                "VERIFIED",
+                "VERIFIED"));
+
+            var version = await RunAsyncWithoutHomeAsync(Path.Combine(home, "hiker.exe"), "version", "--json");
+            using var document = JsonDocument.Parse(version.Output);
+
+            Assert.True(version.ExitCode == 0, $"stdout={version.Output}\nstderr={version.Error}");
+            Assert.Equal("root-compat-runtime", document.RootElement.GetProperty("runtime_identity").GetString());
+        }
+        finally
+        {
+            if (Directory.Exists(home)) Directory.Delete(home, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task StableLauncherPropagatesRuntimeJsonExitCodeAndIdentityWithBoundedLatency()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -90,6 +131,25 @@ public sealed class StableLauncherProcessTests
             UseShellExecute = false
         };
         start.Environment["HIKER_HOME"] = home;
+        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        var watch = Stopwatch.StartNew();
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Launcher did not start");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        watch.Stop();
+        return new ProcessResult(process.ExitCode, await output, await error, watch.Elapsed);
+    }
+
+    private static async Task<ProcessResult> RunAsyncWithoutHomeAsync(string executable, params string[] arguments)
+    {
+        var start = new ProcessStartInfo(executable)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        start.Environment.Remove("HIKER_HOME");
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         var watch = Stopwatch.StartNew();
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Launcher did not start");

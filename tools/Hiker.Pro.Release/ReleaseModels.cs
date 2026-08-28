@@ -40,6 +40,34 @@ internal sealed record ReleaseVerifyOptions(
     string ExpectedPublicKeyFingerprint,
     string? ReportPath);
 
+public sealed record ReleaseInstallOptions(
+    string PackagePath,
+    string PublicKeyPath,
+    string KeyId,
+    string ExpectedPublicKeyFingerprint,
+    string HikerHome,
+    string? LocatorPath,
+    bool UpdateUserPath);
+
+public sealed record ReleaseInstallResult(
+    string ContractVersion,
+    bool Ok,
+    string Status,
+    string ProductVersion,
+    string RuntimeIdentity,
+    string ActiveRuntime,
+    string? PreviousRuntime,
+    long InstallGeneration,
+    string StableLauncher,
+    string CompatibilityLauncher,
+    string LocatorPath,
+    bool FlatRuntimeBootstrapped,
+    bool PointerChanged,
+    int VerifiedRuntimeFiles,
+    string PackageSha256,
+    string EntitlementVerification,
+    string? Diagnostic = null);
+
 internal sealed record ReleaseGateCheck(string Id, string Status, string Detail, IReadOnlyDictionary<string, object?> Metrics);
 
 internal sealed record ReleaseVerificationResult(

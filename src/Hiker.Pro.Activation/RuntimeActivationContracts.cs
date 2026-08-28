@@ -51,6 +51,13 @@ public sealed record RuntimeActivationResult(
     int VerifiedFiles,
     bool PointerChanged);
 
+public sealed record FlatRuntimeBootstrapResult(
+    string Status,
+    ActiveRuntimePointer Pointer,
+    string RuntimeDirectory,
+    int VerifiedFiles,
+    bool PointerChanged);
+
 public sealed record RuntimeLaunchTarget(
     string Executable,
     ActiveRuntimePointer Pointer,

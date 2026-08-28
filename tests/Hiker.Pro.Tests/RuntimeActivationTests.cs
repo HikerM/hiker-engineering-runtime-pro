@@ -158,6 +158,87 @@ public sealed class RuntimeActivationTests
         }
     }
 
+    [Fact]
+    public async Task FlatRuntimeBootstrapPreservesCurrentRuntimeAsImmutableRollbackTarget()
+    {
+        var home = Path.Combine(Path.GetTempPath(), $"hiker-flat-bootstrap-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(home);
+        try
+        {
+            foreach (var file in new[] { "hiker.exe", "hiker.deps.json", "hiker.runtimeconfig.json", "hostfxr.dll", "hostpolicy.dll", "runtime.dat" })
+                await File.WriteAllTextAsync(Path.Combine(home, file), $"flat:{file}");
+            var identity = Fixture.Identity("runtime-flat", "5.19.0-rc.7", CommitA);
+            var probe = new FakeProbe { Result = new RuntimeProbeResult("5.19.0-rc.7", "0.1.0", "3.0.0", 2) };
+            var bootstrap = new FlatRuntimeBootstrapper(home, probe);
+
+            var first = await bootstrap.BootstrapAsync(identity);
+            var second = await bootstrap.BootstrapAsync(identity);
+            var manager = new RuntimeActivationManager(home, probe);
+            var nextStaging = Path.Combine(home, "incoming", ".staging-next");
+            Directory.CreateDirectory(nextStaging);
+            await File.WriteAllTextAsync(Path.Combine(nextStaging, "hiker.exe"), "next:hiker.exe");
+            await File.WriteAllTextAsync(Path.Combine(nextStaging, "runtime.dat"), "next:runtime.dat");
+            var next = Fixture.Identity("runtime-next", "5.19.0-rc.8", CommitB);
+            probe.Result = new RuntimeProbeResult("5.19.0-rc.8", "0.1.0", "3.0.0", 2);
+            var activated = await manager.ActivateAsync(new VerifiedRuntimePackage(nextStaging, next, await Fixture.HashesAsync(nextStaging), "VERIFIED", "VERIFIED"));
+            var rollback = await manager.RollbackAsync();
+
+            Assert.Equal("BOOTSTRAPPED", first.Status);
+            Assert.Equal("ALREADY_BOOTSTRAPPED", second.Status);
+            Assert.Equal("runtime-flat", activated.Pointer.PreviousRuntime);
+            Assert.Equal("runtime-flat", rollback.Pointer.ActiveRuntime);
+            Assert.True(File.Exists(Path.Combine(first.RuntimeDirectory, "local-runtime-snapshot.json")));
+            Assert.Equal("flat:hiker.exe", await File.ReadAllTextAsync(Path.Combine(home, "hiker.exe")));
+        }
+        finally
+        {
+            if (Directory.Exists(home)) Directory.Delete(home, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PreexistingImmutableRuntimeMustMatchSignedHashInventory()
+    {
+        var fixture = await Fixture.CreateAsync();
+        try
+        {
+            await fixture.ActivateAsync("runtime-a", "5.19.0-rc.7", CommitA);
+            var staging = await fixture.StageAsync("runtime-b");
+            var identity = Fixture.Identity("runtime-b", "5.19.0-rc.8", CommitB);
+            var hashes = await Fixture.HashesAsync(staging);
+            var target = Path.Combine(fixture.Home, "runtimes", "runtime-b");
+            Directory.CreateDirectory(target);
+            foreach (var file in Directory.EnumerateFiles(staging)) File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
+            await File.WriteAllTextAsync(Path.Combine(target, "runtime-identity.json"), System.Text.Json.JsonSerializer.Serialize(identity, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
+            await File.WriteAllTextAsync(Path.Combine(target, "runtime.dat"), "tampered");
+            fixture.SetProbe(new RuntimeProbeResult("5.19.0-rc.8", "0.1.0", "3.0.0", 2));
+
+            await Assert.ThrowsAsync<InvalidDataException>(() => fixture.Manager.ActivateAsync(new VerifiedRuntimePackage(staging, identity, hashes, "VERIFIED", "VERIFIED")));
+            Assert.Equal("runtime-a", (await new RuntimePointerStore(fixture.Home).ReadAsync())!.ActiveRuntime);
+        }
+        finally
+        {
+            fixture.Dispose();
+        }
+    }
+
+    [Fact]
+    public void ActivationLockFailsClosedWhileRuntimeInvocationIsActive()
+    {
+        var home = Path.Combine(Path.GetTempPath(), $"hiker-runtime-lock-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(home);
+        try
+        {
+            using var first = RuntimeUseLock.AcquireExecution(home);
+            using var second = RuntimeUseLock.AcquireExecution(home);
+            Assert.Throws<InvalidOperationException>(() => RuntimeUseLock.AcquireActivation(home));
+        }
+        finally
+        {
+            if (Directory.Exists(home)) Directory.Delete(home, recursive: true);
+        }
+    }
+
     private sealed class Fixture : IDisposable
     {
         private readonly FakeProbe probe = new();
@@ -216,6 +297,8 @@ public sealed class RuntimeActivationTests
             }
             return values;
         }
+
+        public void SetProbe(RuntimeProbeResult result) => probe.Result = result;
 
         public void Dispose()
         {

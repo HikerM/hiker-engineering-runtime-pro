@@ -55,7 +55,9 @@ internal sealed class ReleasePackageBuilder
             var runtimeIdentity = $"{versions.Product}-{commit[..12]}";
             var runtimeRoot = Path.Combine(payloadRoot, "runtimes", runtimeIdentity);
             var launcherRoot = Path.Combine(payloadRoot, "bin");
-            await PublishAsync(root, runtimeRoot, launcherRoot, versions.Product, options, cancellationToken).ConfigureAwait(false);
+            var compatibilityRoot = Path.Combine(payloadRoot, "compat");
+            var toolsRoot = Path.Combine(payloadRoot, "tools");
+            await PublishAsync(root, runtimeRoot, launcherRoot, compatibilityRoot, toolsRoot, versions.Product, options, cancellationToken).ConfigureAwait(false);
             RemoveBuildOnlyFiles(payloadRoot);
             var identity = new RuntimeIdentity(
                 versions.Product,
@@ -180,16 +182,56 @@ internal sealed class ReleasePackageBuilder
         string repositoryRoot,
         string runtimeRoot,
         string launcherRoot,
+        string compatibilityRoot,
+        string toolsRoot,
         string version,
         ReleaseBuildOptions options,
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(runtimeRoot);
         Directory.CreateDirectory(launcherRoot);
+        Directory.CreateDirectory(compatibilityRoot);
+        Directory.CreateDirectory(toolsRoot);
         var runtimeProject = Path.Combine(repositoryRoot, "src", "Hiker.Pro.Cli", "Hiker.Pro.Cli.csproj");
         var launcherProject = Path.Combine(repositoryRoot, "src", "Hiker.Pro.Launcher", "Hiker.Pro.Launcher.csproj");
+        var installerProject = Path.Combine(repositoryRoot, "tools", "Hiker.Pro.Release", "Hiker.Pro.Release.csproj");
         await PublishProjectAsync(runtimeProject, runtimeRoot, repositoryRoot, version, options, cancellationToken).ConfigureAwait(false);
         await PublishProjectAsync(launcherProject, launcherRoot, repositoryRoot, version, options, cancellationToken).ConfigureAwait(false);
+        await PublishProjectAsync(installerProject, toolsRoot, repositoryRoot, version, options, cancellationToken).ConfigureAwait(false);
+        await PublishCompatibilityLauncherAsync(launcherProject, compatibilityRoot, repositoryRoot, version, options, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task PublishCompatibilityLauncherAsync(
+        string project,
+        string output,
+        string repositoryRoot,
+        string version,
+        ReleaseBuildOptions options,
+        CancellationToken cancellationToken)
+    {
+        await ProcessRunner.RequireAsync(
+            "dotnet",
+            repositoryRoot,
+            new[]
+            {
+                "publish", project,
+                "--configuration", options.Configuration,
+                "--runtime", options.RuntimeIdentifier,
+                "--self-contained", "true",
+                "--output", output,
+                $"-p:Version={version}",
+                "-p:UseAppHost=true",
+                "-p:PublishSingleFile=true",
+                "-p:IncludeNativeLibrariesForSelfExtract=true",
+                "-p:EnableCompressionInSingleFile=true",
+                "-p:ContinuousIntegrationBuild=true",
+                "-p:DeterministicSourcePaths=true",
+                $"-p:PathMap={repositoryRoot}=/src",
+                "-p:DebugSymbols=false",
+                "-p:DebugType=None"
+            },
+            TimeSpan.FromMinutes(5),
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task PublishProjectAsync(

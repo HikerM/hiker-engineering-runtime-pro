@@ -15,5 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Hiker.Pro.Runtime/Hiker.Pro.Runtime.csproj" />
     <ProjectReference Include="../../src/Hiker.Pro.Cli/Hiker.Pro.Cli.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../src/Hiker.Pro.Launcher/Hiker.Pro.Launcher.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../tools/Hiker.Pro.Release/Hiker.Pro.Release.csproj" />
   </ItemGroup>
 </Project>

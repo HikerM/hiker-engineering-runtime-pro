@@ -103,7 +103,33 @@ Change Intelligence 专项验证中，LOCAL Probe P50/P95 为 0.0354/0.0465 ms�
 
 ## 安装包使用
 
-`hiker-pro-<version>-win-x64.zip` 是目录式自包含发行包。目标 Windows x64 电脑不需要安装 .NET SDK 或 .NET Runtime，也不依赖全局 `DOTNET_ROOT`。必须完整解压 `payload` 中的 `hiker.exe`、`hostfxr.dll`、`hostpolicy.dll`、`coreclr.dll`、托管程序集和 JSON；不得只复制 `hiker.exe`。
+`hiker-pro-<version>-win-x64.zip` 是签名的目录式自包含发行包。目标 Windows x64 电脑不需要安装 .NET SDK 或 .NET Runtime，也不依赖全局 `DOTNET_ROOT`。不得只复制包内某个 `hiker.exe`，也不得把新 DLL 覆盖到正在运行的旧目录。
+
+首次安装必须使用独立取得并已信任的 Release 工具、公钥及公钥 SHA-256；包内 `payload/tools/hiker-pro-release.exe` 只有在整个包通过签名与哈希校验后，才可作为后续升级工具。安装仅在 Codex Turn 终态/自然 Checkpoint 后执行：
+
+```powershell
+hiker-pro-release verify `
+  --package <hiker-pro.zip> `
+  --public-key <release.public.pem> `
+  --key-id <release-key-id> `
+  --public-key-sha256 <pinned-sha256>
+
+hiker-pro-release install `
+  --package <hiker-pro.zip> `
+  --public-key <release.public.pem> `
+  --key-id <release-key-id> `
+  --public-key-sha256 <pinned-sha256> `
+  --home D:\Hiker\5.19 `
+  --update-user-path
+```
+
+安装器先验证外部 checksum、固定 Trust Root、签名清单和全部 Artifact Hash，再把 Runtime 提升到不可变版本目录并原子切换 Pointer。已有平铺 Runtime 会先做有界探测、逐文件 Hash 和不可变快照，作为 `previous_runtime` 保留；不会删除项目 `.ai`，也不会扫描项目、Git 或聊天历史。`bin/hiker.exe` 是稳定入口，根目录 `hiker.exe` 只作为旧 PATH 的薄兼容入口；机器 Locator 位于 `%LOCALAPPDATA%\Hiker\pro-runtime.json`，供 Community Bridge 在 Codex 不重启时有界发现稳定入口。
+
+显式回滚只切换到 Pointer 中上一个已验证 Runtime，不恢复旧 Lease、Agent、Process 或项目运行态：
+
+```powershell
+D:\Hiker\5.19\tools\hiker-pro-release.exe runtime-rollback --home D:\Hiker\5.19
+```
 
 ```powershell
 hiker version --json
@@ -144,6 +170,7 @@ dotnet test -c Release
 | `src/Hiker.Pro.Runtime` | State、Task、Lease、Worktree、Checkpoint、Recovery、Context、Graph 与商业信任边界 |
 | `src/Hiker.Pro.Cli` | 面向工程项目的薄 CLI 与 `hiker-cli/v1` machine contract |
 | `src/Hiker.Pro.Activation` | 验证式 Runtime staging、不可变版本目录、原子 Pointer、兼容性与回滚 |
+| `tools/Hiker.Pro.Release` | 签名发布、完整性验证、稳定 Launcher 安装、平铺 Runtime 引导与原子激活 |
 | `src/Hiker.Pro.Launcher` | 稳定入口，只从活动 Pointer 解析并启动当前 Runtime |
 | `tools/Hiker.Pro.Verification` | 老化、规模、真实服务、Codex Runtime、Environment、Change Intelligence 与 COMM-G1–G17 验证 |
 | `tools/Hiker.Pro.Release` | 版本事实、签名 RC 构建、独立包校验与商业发布 Gate |

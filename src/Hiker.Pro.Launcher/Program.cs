@@ -7,10 +7,14 @@ var jsonMode = args.Contains("--json", StringComparer.Ordinal);
 try
 {
     var configuredHome = Environment.GetEnvironmentVariable("HIKER_HOME");
+    var executableDirectory = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd(Path.DirectorySeparatorChar);
+    var inferredHome = string.Equals(Path.GetFileName(executableDirectory), "bin", StringComparison.OrdinalIgnoreCase)
+        ? Directory.GetParent(executableDirectory)?.FullName
+        : executableDirectory;
     var home = string.IsNullOrWhiteSpace(configuredHome)
-        ? Directory.GetParent(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar))?.FullName
-          ?? throw new InvalidOperationException("Stable launcher cannot resolve Hiker home")
+        ? inferredHome ?? throw new InvalidOperationException("Stable launcher cannot resolve Hiker home")
         : Path.GetFullPath(configuredHome);
+    using var runtimeUse = RuntimeUseLock.AcquireExecution(home);
     var target = await new RuntimeLauncherResolver(home).ResolveAsync().ConfigureAwait(false);
     if (string.Equals(Path.GetFullPath(target.Executable), Environment.ProcessPath, StringComparison.OrdinalIgnoreCase))
         throw new InvalidDataException("Stable launcher pointer resolves back to the launcher");
