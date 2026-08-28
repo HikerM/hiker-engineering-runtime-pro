@@ -175,10 +175,10 @@ internal sealed class ChangeIntelligenceScenario(VerificationOptions options)
             "src/Hiker.Pro.Runtime/State/LegacyUntrustedContentInspector.cs"
         };
         var log = await ProcessTools.RequireAsync("git", options.RepositoryRoot,
-            new[] { "log", "-3", "--format=%H%x09%s", "--" }.Concat(paths), TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+            new[] { "log", "--max-count=3", "--fixed-strings", "--grep=fix(migration):", "--format=%H%x09%s", "--" }.Concat(paths), TimeSpan.FromSeconds(30)).ConfigureAwait(false);
         var commits = log.StandardOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
             .Select(line => line.Split('\t', 2)).Where(static parts => parts.Length == 2 && parts[1].StartsWith("fix(migration):", StringComparison.Ordinal)).Reverse().ToArray();
-        if (commits.Length != 3) throw new InvalidDataException("Expected the bounded three-commit Legacy Migration repair history");
+        if (commits.Length != 3) throw new InvalidDataException("Could not resolve the bounded three-commit Legacy Migration repair history");
         var coordinator = new ChangeLoopCoordinator(state);
         ChangeAttemptResult? result = null;
         for (var index = 0; index < commits.Length; index++)
