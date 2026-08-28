@@ -2,6 +2,12 @@ using System.Text.Json;
 using Hiker.Pro.Verification;
 using Hiker.Pro.Release;
 
+if (args.Length > 0 && args[0] is "help" or "--help" or "-h")
+{
+    Console.WriteLine("hiker-pro-verify [--scenario <name>] [--root <path>] [--output <path>] [--file-scale <10000-500000>]");
+    return 0;
+}
+
 var options = Parse(args);
 var startedAt = DateTimeOffset.UtcNow;
 var gitCommit = (await ProcessTools.RequireAsync("git", options.RepositoryRoot, new[] { "rev-parse", "HEAD" }, TimeSpan.FromSeconds(30))).StandardOutput.Trim();

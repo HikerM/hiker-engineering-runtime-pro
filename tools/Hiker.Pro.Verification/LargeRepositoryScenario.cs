@@ -34,14 +34,9 @@ internal sealed class LargeRepositoryScenario(VerificationOptions options)
             stopwatch.Stop();
             var scanMs = stopwatch.Elapsed.TotalMilliseconds;
             stopwatch.Restart();
-            await ProcessTools.RequireAsync("git", root, new[] { "add", "--all" }, TimeSpan.FromMinutes(10)).ConfigureAwait(false);
-            await ProcessTools.RequireAsync("git", root, new[]
-            {
-                "-c", "user.name=Hiker Verification", "-c", "user.email=verification@example.invalid",
-                "commit", "-m", "large repository fixture"
-            }, TimeSpan.FromMinutes(10)).ConfigureAwait(false);
+            await ImportTrackedFixtureAsync(root, options.FileScale).ConfigureAwait(false);
             stopwatch.Stop();
-            var gitIndexMs = stopwatch.Elapsed.TotalMilliseconds;
+            var gitFixtureImportMs = stopwatch.Elapsed.TotalMilliseconds;
             for (var index = 0; index < 100; index++)
             {
                 var path = Path.Combine(root, "services", $"service-{index % 50:D2}", $"bucket-{index / 1000:D4}", $"component-{index:D6}.json");
@@ -75,7 +70,7 @@ internal sealed class LargeRepositoryScenario(VerificationOptions options)
                         ["creation_checkpoints_ms"] = creation,
                         ["required_scale_points"] = requiredScalePoints,
                         ["full_fingerprint_ms"] = scanMs,
-                        ["git_add_commit_ms"] = gitIndexMs,
+                        ["git_fixture_import_ms"] = gitFixtureImportMs,
                         ["affected_files"] = changed,
                         ["git_delta_status_ms"] = deltaMs,
                         ["fingerprint"] = fingerprint,
@@ -87,6 +82,63 @@ internal sealed class LargeRepositoryScenario(VerificationOptions options)
         {
             NormalizeAndDelete(root);
         }
+    }
+
+    private static async Task ImportTrackedFixtureAsync(string root, int fileScale)
+    {
+        var start = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = root,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        start.ArgumentList.Add("fast-import");
+        start.ArgumentList.Add("--quiet");
+
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Unable to start git fast-import");
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        try
+        {
+            await using (var input = process.StandardInput)
+            {
+                input.NewLine = "\n";
+                await input.WriteLineAsync("commit refs/heads/main").ConfigureAwait(false);
+                await input.WriteLineAsync("mark :1").ConfigureAwait(false);
+                await input.WriteLineAsync("author Hiker Verification <verification@example.invalid> 1704067200 +0000").ConfigureAwait(false);
+                await input.WriteLineAsync("committer Hiker Verification <verification@example.invalid> 1704067200 +0000").ConfigureAwait(false);
+                await input.WriteLineAsync("data 24").ConfigureAwait(false);
+                await input.WriteLineAsync("large repository fixture").ConfigureAwait(false);
+                for (var index = 0; index < fileScale; index++)
+                {
+                    timeout.Token.ThrowIfCancellationRequested();
+                    var relative = $"services/service-{index % 50:D2}/bucket-{index / 1000:D4}/component-{index:D6}.json";
+                    var content = $"{{\"component\":\"component-{index:D6}\",\"service\":\"service-{index % 50:D2}\",\"contract\":\"api-{index % 25:D2}\",\"sequence\":{index}}}";
+                    await input.WriteLineAsync($"M 100644 inline {relative}").ConfigureAwait(false);
+                    await input.WriteLineAsync($"data {Encoding.UTF8.GetByteCount(content)}").ConfigureAwait(false);
+                    await input.WriteLineAsync(content).ConfigureAwait(false);
+                }
+                await input.WriteLineAsync().ConfigureAwait(false);
+                await input.WriteLineAsync("done").ConfigureAwait(false);
+                await input.FlushAsync(timeout.Token).ConfigureAwait(false);
+            }
+
+            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            throw;
+        }
+
+        var error = await standardError.ConfigureAwait(false);
+        _ = await standardOutput.ConfigureAwait(false);
+        if (process.ExitCode != 0) throw new InvalidOperationException($"git fast-import exited {process.ExitCode}: {error.Trim()}");
+        await ProcessTools.RequireAsync("git", root, new[] { "reset", "--mixed", "HEAD" }, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
     }
 
     private static async Task<string> FingerprintAsync(string root)
