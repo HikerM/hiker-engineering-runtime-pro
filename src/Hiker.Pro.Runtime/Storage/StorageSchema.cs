@@ -1,5 +1,4 @@
-using System.Security.Cryptography;
-using System.Text;
+using Hiker.Pro.State;
 using Microsoft.Data.Sqlite;
 
 namespace Hiker.Pro.Storage;
@@ -173,7 +172,9 @@ internal static class StorageSchema
         );
         """;
 
-    public static string Checksum => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(CreateSql))).ToLowerInvariant();
+    public static string Checksum => SchemaSqlChecksum.Compute(CreateSql);
+
+    public static bool IsCompatibleChecksum(string? checksum) => SchemaSqlChecksum.IsCompatible(checksum, CreateSql);
 
     public static async Task InitializeAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
@@ -192,7 +193,7 @@ internal static class StorageSchema
         var checksum = scalar is null or DBNull
             ? null
             : Convert.ToString(scalar, System.Globalization.CultureInfo.InvariantCulture);
-        if (checksum is not null && !string.Equals(checksum, Checksum, StringComparison.Ordinal))
+        if (checksum is not null && !IsCompatibleChecksum(checksum))
             throw new InvalidDataException("Storage lifecycle schema extension checksum does not match");
 
         await using var migration = connection.CreateCommand();

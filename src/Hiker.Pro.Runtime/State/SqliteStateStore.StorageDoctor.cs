@@ -96,7 +96,7 @@ public sealed partial class SqliteStateStore
             extension.CommandText = "SELECT checksum FROM schema_migrations WHERE version=$version;";
             extension.Parameters.AddWithValue("$version", StorageSchema.ExtensionVersion);
             var value = Convert.ToString(await extension.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
-            if (!string.Equals(value, StorageSchema.Checksum, StringComparison.Ordinal)) findings.Add(new HealthFinding("STORAGE_SCHEMA_MISMATCH", "BLOCKED", "state", value ?? "missing", false));
+            if (!StorageSchema.IsCompatibleChecksum(value)) findings.Add(new HealthFinding("STORAGE_SCHEMA_MISMATCH", "BLOCKED", "state", value ?? "missing", false));
         }
         await using (var core = connection.CreateCommand())
         {
@@ -110,7 +110,7 @@ public sealed partial class SqliteStateStore
             coreMigration.CommandText = "SELECT checksum FROM schema_migrations WHERE version=$version;";
             coreMigration.Parameters.AddWithValue("$version", SqliteSchema.CurrentVersion);
             var value = Convert.ToString(await coreMigration.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
-            if (!string.Equals(value, SqliteSchema.SchemaChecksum, StringComparison.Ordinal))
+            if (!SqliteSchema.IsCompatibleChecksum(value))
                 findings.Add(new HealthFinding("SCHEMA_CHECKSUM_MISMATCH", "BLOCKED", "state", value ?? "missing", false));
         }
         await using (var facts = connection.CreateCommand())

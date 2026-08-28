@@ -175,7 +175,7 @@ public sealed partial class SqliteStateStore
             migration.CommandText = "SELECT checksum FROM schema_migrations WHERE version=$version;";
             migration.Parameters.AddWithValue("$version", SqliteSchema.CurrentVersion);
             var checksum = Convert.ToString(await migration.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
-            if (!string.Equals(checksum, SqliteSchema.SchemaChecksum, StringComparison.Ordinal))
+            if (!SqliteSchema.IsCompatibleChecksum(checksum))
             {
                 findings.Add(new HealthFinding("SCHEMA_CHECKSUM_MISMATCH", "BLOCKED", "state", checksum ?? "missing", false));
             }

@@ -7,6 +7,86 @@ namespace Hiker.Pro.Tests;
 
 public sealed class StorageCliTests
 {
+    [Theory]
+    [InlineData("92732e5744dd104829a06af91f7c6d9b6190a7d624b7874c31896a372b0e2074", "757b9a2fa51c7c2ab968a59cc50d6adaa1332499fd414bac2d5717ac5cff4a52")]
+    [InlineData("d570b9238357a30d86cf6c08af61a6e83f7e4211159f42f8e6e9b2dd4e4385b9", "9148a7f1074a81382d6cd9933ee03536c66f9e581940bbf5df9233bc93a780e4")]
+    public async Task LineEndingSpecificSchemaChecksums_AreReadCompatibleWithoutRewrite(
+        string coreChecksum,
+        string storageChecksum)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"hiker-schema-line-endings-{Guid.NewGuid():N}");
+        try
+        {
+            var init = await RunCliAsync(root, "init", "--project-id", "schema-line-endings-project");
+            Assert.Equal(0, init.ExitCode);
+            var database = Path.Combine(root, ".ai", "state", "hiker-state.db");
+            SqliteConnection.ClearAllPools();
+            await using (var connection = new SqliteConnection($"Data Source={database}"))
+            {
+                await connection.OpenAsync();
+                await using (var current = connection.CreateCommand())
+                {
+                    current.CommandText = "SELECT checksum FROM schema_migrations WHERE version=$version;";
+                    current.Parameters.AddWithValue("$version", "3.0.0");
+                    Assert.Equal("92732e5744dd104829a06af91f7c6d9b6190a7d624b7874c31896a372b0e2074", await current.ExecuteScalarAsync());
+                    current.Parameters["$version"].Value = "storage-lifecycle-v1";
+                    Assert.Equal("757b9a2fa51c7c2ab968a59cc50d6adaa1332499fd414bac2d5717ac5cff4a52", await current.ExecuteScalarAsync());
+                }
+
+                await using var update = connection.CreateCommand();
+                update.CommandText = """
+                    UPDATE schema_migrations
+                    SET checksum = CASE version
+                        WHEN '3.0.0' THEN $core
+                        WHEN 'storage-lifecycle-v1' THEN $storage
+                        ELSE checksum
+                    END
+                    WHERE version IN ('3.0.0', 'storage-lifecycle-v1');
+                    """;
+                update.Parameters.AddWithValue("$core", coreChecksum);
+                update.Parameters.AddWithValue("$storage", storageChecksum);
+                Assert.Equal(2, await update.ExecuteNonQueryAsync());
+            }
+
+            var status = await RunCliAsync(root, "status");
+            Assert.True(status.ExitCode == 0, $"stdout={status.Output}\nstderr={status.Error}");
+            using (var payload = JsonDocument.Parse(status.Output))
+            {
+                Assert.True(payload.RootElement.GetProperty("ok").GetBoolean());
+                Assert.Equal("HEALTHY", payload.RootElement.GetProperty("storage").GetProperty("status").GetString());
+            }
+
+            var doctor = await RunCliAsync(root, "doctor");
+            Assert.True(doctor.ExitCode == 0, $"stdout={doctor.Output}\nstderr={doctor.Error}");
+            using (var payload = JsonDocument.Parse(doctor.Output))
+            {
+                Assert.Equal("HEALTHY", payload.RootElement.GetProperty("status").GetString());
+            }
+
+            SqliteConnection.ClearAllPools();
+            await using (var connection = new SqliteConnection($"Data Source={database};Mode=ReadOnly"))
+            {
+                await connection.OpenAsync();
+                await using var read = connection.CreateCommand();
+                read.CommandText = "SELECT version, checksum FROM schema_migrations WHERE version IN ('3.0.0', 'storage-lifecycle-v1') ORDER BY version;";
+                await using var reader = await read.ExecuteReaderAsync();
+                var values = new Dictionary<string, string>(StringComparer.Ordinal);
+                while (await reader.ReadAsync())
+                {
+                    values[reader.GetString(0)] = reader.GetString(1);
+                }
+
+                Assert.Equal(coreChecksum, values["3.0.0"]);
+                Assert.Equal(storageChecksum, values["storage-lifecycle-v1"]);
+            }
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task ExistingPreStorageLifecycleDatabase_IsAdditivelyUpgradedBeforeStatus()
     {

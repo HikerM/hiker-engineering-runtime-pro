@@ -180,14 +180,14 @@ internal static class SqliteSchema
         }
 
         return values.TryGetValue(CurrentVersion, out var coreChecksum) &&
-               string.Equals(coreChecksum, SchemaChecksum, StringComparison.Ordinal) &&
+               IsCompatibleChecksum(coreChecksum) &&
                values.TryGetValue(StorageSchema.ExtensionVersion, out var storageChecksum) &&
-               string.Equals(storageChecksum, StorageSchema.Checksum, StringComparison.Ordinal);
+               StorageSchema.IsCompatibleChecksum(storageChecksum);
     }
 
-    public static string SchemaChecksum => Convert.ToHexString(
-        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(CreateSql)))
-        .ToLowerInvariant();
+    public static string SchemaChecksum => SchemaSqlChecksum.Compute(CreateSql);
+
+    public static bool IsCompatibleChecksum(string? checksum) => SchemaSqlChecksum.IsCompatible(checksum, CreateSql);
 
     private static async Task ExecuteAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
     {
