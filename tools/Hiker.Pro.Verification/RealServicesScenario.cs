@@ -155,6 +155,7 @@ internal sealed class RealServicesScenario(VerificationOptions options)
             await ProcessTools.RequireAsync("docker", options.RepositoryRoot, new[]
             {
                 "run", "--detach", "--name", container, "--label", label,
+                "--tmpfs", "/var/lib/postgresql/data:rw",
                 "--env", $"POSTGRES_PASSWORD={password}", "--env", "POSTGRES_DB=hiker_fixture",
                 "postgres:16.14"
             }, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
