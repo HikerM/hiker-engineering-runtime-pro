@@ -138,16 +138,19 @@ public sealed class ReleaseRuntimeInstallerTests
         public static async Task<Fixture> CreateAsync(bool withFlatRuntime = false)
         {
             var repository = FindRepositoryRoot();
+            var configuration = AppContext.BaseDirectory.Contains($"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+                ? "Release"
+                : "Debug";
             var root = Path.Combine(Path.GetTempPath(), $"hiker-release-installer-{Guid.NewGuid():N}");
             var stage = Path.Combine(root, "stage");
             var payload = Path.Combine(stage, "payload");
             var identityValue = $"{BuildVersionFacts.Current.Product}-{Commit[..12]}";
             var runtimeRoot = Path.Combine(payload, "runtimes", identityValue);
-            CopyDirectory(Path.Combine(repository, "src", "Hiker.Pro.Cli", "bin", "Debug", "net9.0"), runtimeRoot);
-            CopyDirectory(Path.Combine(repository, "src", "Hiker.Pro.Launcher", "bin", "Debug", "net9.0"), Path.Combine(payload, "bin"));
-            CopyDirectory(Path.Combine(repository, "tools", "Hiker.Pro.Release", "bin", "Debug", "net9.0"), Path.Combine(payload, "tools"));
+            CopyDirectory(Path.Combine(repository, "src", "Hiker.Pro.Cli", "bin", configuration, "net9.0"), runtimeRoot);
+            CopyDirectory(Path.Combine(repository, "src", "Hiker.Pro.Launcher", "bin", configuration, "net9.0"), Path.Combine(payload, "bin"));
+            CopyDirectory(Path.Combine(repository, "tools", "Hiker.Pro.Release", "bin", configuration, "net9.0"), Path.Combine(payload, "tools"));
             Directory.CreateDirectory(Path.Combine(payload, "compat"));
-            File.Copy(Path.Combine(repository, "src", "Hiker.Pro.Launcher", "bin", "Debug", "net9.0", "hiker.exe"), Path.Combine(payload, "compat", "hiker.exe"));
+            File.Copy(Path.Combine(repository, "src", "Hiker.Pro.Launcher", "bin", configuration, "net9.0", "hiker.exe"), Path.Combine(payload, "compat", "hiker.exe"));
             var identity = new RuntimeIdentity(
                 BuildVersionFacts.Current.Product,
                 BuildVersionFacts.Current.Runtime,
