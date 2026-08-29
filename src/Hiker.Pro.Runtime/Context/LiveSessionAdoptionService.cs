@@ -181,6 +181,42 @@ public sealed class LiveSessionAdoptionService(
                 new[] { "ACTIVE_OWNERSHIP_INDEX_BUDGET_EXCEEDED" });
         }
 
+        var sessionTasks = await store.ReadAsync(
+            projectId,
+            EntityKinds.Task,
+            lifecycle: null,
+            limit: 257,
+            cancellationToken).ConfigureAwait(false);
+        reads++;
+        if (sessionTasks.Count >= 257)
+        {
+            return Result(
+                LiveAdoptionStatuses.Blocked,
+                project,
+                provider,
+                sessionFingerprint,
+                goal.Key.EntityId,
+                task.Key.EntityId,
+                checkpoint.State?.Key.EntityId,
+                false,
+                false,
+                "REVIEW_SESSION_TASK_INDEX",
+                reads,
+                0,
+                null,
+                new[] { "SESSION_TASK_INDEX_BUDGET_EXCEEDED" });
+        }
+
+        var historicalSessionTasks = sessionTasks
+            .Where(candidate =>
+                candidate.Key.EntityId != task.Key.EntityId &&
+                string.Equals(candidate.Authority, Authority, StringComparison.Ordinal) &&
+                LiveAdoptionStateCodec.TryAdoptedTask(candidate, out var adopted) &&
+                string.Equals(adopted.ProviderBindingId, bindingId, StringComparison.Ordinal) &&
+                string.Equals(adopted.ExecutionId, LiveAdoptionStateCodec.ExecutionId(projectId, candidate.Key.EntityId, bindingId), StringComparison.Ordinal))
+            .OrderBy(static candidate => candidate.Key.EntityId, StringComparer.Ordinal)
+            .ToArray();
+
         var staleRuntime = new List<StaleSessionRuntime>();
         foreach (var ownership in activeOwnerships.Where(candidate =>
                      candidate.Key.EntityId != task.Key.EntityId &&
@@ -442,7 +478,8 @@ public sealed class LiveSessionAdoptionService(
             goal.SourceFingerprint,
             task.SourceFingerprint,
             checkpoint.State?.SourceFingerprint ?? "no-source-checkpoint",
-            string.Join('|', staleRuntime.Select(static item => $"{item.Ownership.Key.EntityId}:{item.Ownership.Generation}:{item.Task.Generation}"))));
+            string.Join('|', staleRuntime.Select(static item => $"{item.Ownership.Key.EntityId}:{item.Ownership.Generation}:{item.Task.Generation}")),
+            string.Join('|', historicalSessionTasks.Select(static item => $"{item.Key.EntityId}:{item.Generation}:{item.Lifecycle}"))));
         var checkpointId = $"adoption-{sourceFingerprint[..24]}";
         var checkpointKey = new StateKey(projectId, EntityKinds.Checkpoint, checkpointId);
         var evidenceKey = new StateKey(projectId, EntityKinds.Evidence, $"live-adoption-{sessionFingerprint[..24]}");
@@ -609,6 +646,18 @@ public sealed class LiveSessionAdoptionService(
         foreach (var stale in staleRuntime)
         {
             dependencyChanges.AddRange(LiveAdoptionStateCodec.ReplaceLiveContextEdges(stale.Edges));
+        }
+        foreach (var historicalTask in historicalSessionTasks)
+        {
+            dependencyChanges.Add(new DependencyEdge(
+                projectId,
+                EntityKinds.Task,
+                historicalTask.Key.EntityId,
+                EntityKinds.ProviderSessionBinding,
+                bindingId,
+                "BOUND_TO",
+                sourceFingerprint,
+                StateLifecycle.Archived));
         }
         var operationId = $"live-adoption-{sessionFingerprint[..24]}-{sourceFingerprint[..16]}";
         var commit = await coordinator.CommitBatchAsync(new BatchTransactionRequest(

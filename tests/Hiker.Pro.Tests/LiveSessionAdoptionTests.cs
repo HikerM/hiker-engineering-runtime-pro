@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Hiker.Pro.Context;
 using Hiker.Pro.Diagnostics;
@@ -479,6 +481,85 @@ public sealed class LiveSessionAdoptionTests
     }
 
     [Fact]
+    public async Task SameProviderSession_ArchivesHiddenBindingEdgeWhoseTargetIsHistorical()
+    {
+        await using var project = await TestProject.CreateAsync(ProjectId);
+        await SeedCurrentWorkAsync(project);
+        var service = Service(project);
+        var first = await service.AdoptAsync(Request(boundary: "NEW_TASK"));
+        Assert.Equal(LiveAdoptionStatuses.Adopted, first.Status);
+        var lifecycle = new LiveTurnLifecycleService(project.Store, project.Coordinator, project.Bootstrap);
+        Assert.Equal(
+            LiveTurnCheckpointStatuses.Checkpointed,
+            (await lifecycle.CheckpointAsync(new LiveTurnCheckpointRequest("codex", "provider-session-secret"))).Status);
+        var oldTask = await project.Store.ReadAsync(new StateKey(ProjectId, EntityKinds.Task, "task-current"));
+        Assert.NotNull(oldTask);
+        var hidden = await project.Coordinator.CommitBatchAsync(new BatchTransactionRequest(
+            "seed-hidden-historical-binding-edge",
+            new[]
+            {
+                new StateMutation(
+                    oldTask.Key,
+                    oldTask.Generation,
+                    oldTask.GoalRevision,
+                    oldTask.Lifecycle,
+                    oldTask.Authority,
+                    oldTask.SchemaVersion,
+                    oldTask.SourceFingerprint,
+                    oldTask.DependencyFingerprint,
+                    oldTask.PayloadJson,
+                    oldTask.Retention)
+            },
+            "FIXTURE_CREATED",
+            "HISTORICAL_BINDING_EDGE_FIXTURE",
+            "{}",
+            new[]
+            {
+                new DependencyEdge(
+                    ProjectId,
+                    EntityKinds.Task,
+                    "task-current",
+                    EntityKinds.ProviderSessionBinding,
+                    "codex-" + Hash("codex\0provider-session-secret")[..24],
+                    "BOUND_TO",
+                    "hidden-historical-binding-edge")
+            }));
+        Assert.True(hidden.Committed);
+        Assert.DoesNotContain(
+            await project.Store.QueryDependenciesBoundedAsync(
+                ProjectId,
+                EntityKinds.Task,
+                "task-current",
+                outgoing: true,
+                limit: 16),
+            static edge => edge.Relation == "BOUND_TO");
+        Assert.Equal(
+            "REPAIRABLE",
+            (await project.Coordinator.StorageHealthCheckAsync(
+                ProjectId,
+                Hiker.Pro.Storage.StorageHealthMode.Fast)).Status);
+        await SeedAsync(
+            project,
+            EntityKinds.Task,
+            "task-next",
+            "{\"task_id\":\"task-next\",\"goal_id\":\"goal-current\",\"status\":\"RUNNING\",\"goal_revision\":3}");
+
+        var switched = await service.AdoptAsync(new LiveAdoptionRequest(
+            "codex",
+            "provider-session-secret",
+            "NEW_TASK",
+            "goal-current",
+            "task-next"));
+
+        Assert.Equal(LiveAdoptionStatuses.Adopted, switched.Status);
+        Assert.Equal(
+            "HEALTHY",
+            (await project.Coordinator.StorageHealthCheckAsync(
+                ProjectId,
+                Hiker.Pro.Storage.StorageHealthMode.Fast)).Status);
+    }
+
+    [Fact]
     public async Task DifferentProviderSession_WaitsUntilPriorSessionCheckpointThenReusesSameTask()
     {
         await using var project = await TestProject.CreateAsync(ProjectId);
@@ -652,4 +733,7 @@ public sealed class LiveSessionAdoptionTests
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
     });
+
+    private static string Hash(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 }
