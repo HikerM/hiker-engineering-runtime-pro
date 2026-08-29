@@ -62,6 +62,19 @@ public sealed record LiveTurnCheckpointRequest(
     IReadOnlyList<string>? TestRefs = null,
     int MaxContextBytes = 16_384);
 
+public sealed class LiveTurnCheckpointValidationException(
+    string reasonCode,
+    string field,
+    string message,
+    IReadOnlyList<string>? acceptedValues = null) : ArgumentException(message, field)
+{
+    public string ReasonCode { get; } = reasonCode;
+
+    public string Field { get; } = field;
+
+    public IReadOnlyList<string> AcceptedValues { get; } = acceptedValues ?? Array.Empty<string>();
+}
+
 public sealed record LiveTurnCheckpointResult(
     string Status,
     string? ProjectId,

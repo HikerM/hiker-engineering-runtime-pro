@@ -26,6 +26,42 @@ internal static class LiveAdoptionStateCodec
         }
     }
 
+    public static bool TryAdoptedTask(StateSnapshot snapshot, out AdoptedTaskState task)
+    {
+        try
+        {
+            task = JsonSerializer.Deserialize<AdoptedTaskState>(snapshot.PayloadJson, JsonOptions())!;
+            return task is not null;
+        }
+        catch (JsonException)
+        {
+            task = default!;
+            return false;
+        }
+    }
+
+    public static string ExecutionId(string projectId, string taskId, string bindingId) =>
+        $"execution-{Hash($"{projectId}\0{taskId}\0{bindingId}")[..24]}";
+
+    public static bool IsOwnedByBinding(StateSnapshot ownership, string projectId, string bindingId)
+    {
+        if (ownership.Lifecycle != StateLifecycle.Valid ||
+            !string.Equals(ownership.Authority, LiveSessionAdoptionService.Authority, StringComparison.Ordinal) ||
+            !TryPayload(ownership.PayloadJson, out var payload) ||
+            !payload.TryGetProperty("task_id", out var taskIdValue) ||
+            taskIdValue.ValueKind != JsonValueKind.String ||
+            !payload.TryGetProperty("writer_runtime_id", out var writerValue) ||
+            writerValue.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        var taskId = taskIdValue.GetString();
+        return !string.IsNullOrWhiteSpace(taskId) &&
+               string.Equals(taskId, ownership.Key.EntityId, StringComparison.Ordinal) &&
+               string.Equals(writerValue.GetString(), ExecutionId(projectId, taskId, bindingId), StringComparison.Ordinal);
+    }
+
     public static bool TryPayload(string json, out JsonElement payload)
     {
         try

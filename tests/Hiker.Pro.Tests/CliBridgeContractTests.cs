@@ -148,6 +148,74 @@ public sealed class CliBridgeContractTests
         }
     }
 
+    [Fact]
+    public async Task Checkpoint_FieldCommand_RejectsInvalidOutcomePrecisely_ThenCommitsBoundedReferences()
+    {
+        var root = NewRoot();
+        try
+        {
+            await WriteAsync(
+                Path.Combine(root, ".ai", "governance", "goal-contract.json"),
+                "{\"goal_id\":\"field-goal\",\"revision\":2,\"status\":\"CURRENT\"}");
+            await WriteAsync(
+                Path.Combine(root, ".ai", "runtime", "task.json"),
+                "{\"task_id\":\"field-task\",\"goal_id\":\"field-goal\",\"status\":\"RUNNING\",\"goal_revision\":2}");
+            var attach = ParseSingleDocument((await RunCliAsync(
+                root,
+                "attach",
+                "--provider", "codex",
+                "--provider-session-id", "field-provider-session",
+                "--boundary-proof", "NEW_TASK")).Output);
+            var projectId = attach.GetProperty("project_id").GetString()!;
+            var before = ParseSingleDocument((await RunCliAsync(root, "status")).Output)
+                .GetProperty("metrics").GetProperty("generation").GetInt64();
+
+            var invalid = await RunCliAsync(
+                root,
+                "checkpoint",
+                "--provider", "codex",
+                "--provider-session-id", "field-provider-session",
+                "--outcome", "FIELD_ADOPTION_VERIFIED",
+                "--evidence-ref", "field://rc11-live-adoption",
+                "--test-ref", "field://runtime-context-check");
+            var invalidJson = ParseSingleDocument(invalid.Output);
+            var afterInvalid = ParseSingleDocument((await RunCliAsync(root, "status")).Output)
+                .GetProperty("metrics").GetProperty("generation").GetInt64();
+
+            Assert.Equal(64, invalid.ExitCode);
+            Assert.Equal("USAGE_ERROR", invalidJson.GetProperty("status").GetString());
+            Assert.Equal("INVALID_CHECKPOINT_OUTCOME", invalidJson.GetProperty("reason_code").GetString());
+            Assert.Equal("outcome", invalidJson.GetProperty("invalid_field").GetString());
+            Assert.Contains(
+                invalidJson.GetProperty("accepted_values").EnumerateArray().Select(static item => item.GetString()),
+                static value => value == "NATURAL_CHECKPOINT");
+            Assert.Equal(before, afterInvalid);
+
+            var checkpoint = await RunCliAsync(
+                root,
+                "checkpoint",
+                "--provider", "codex",
+                "--provider-session-id", "field-provider-session",
+                "--outcome", "NATURAL_CHECKPOINT",
+                "--evidence-ref", "field://rc11-live-adoption",
+                "--test-ref", "field://runtime-context-check");
+            var checkpointJson = ParseSingleDocument(checkpoint.Output);
+
+            Assert.Equal(0, checkpoint.ExitCode);
+            Assert.Equal("TURN_CHECKPOINTED", checkpointJson.GetProperty("status").GetString());
+            Assert.False(string.IsNullOrWhiteSpace(checkpointJson.GetProperty("context_fingerprint").GetString()));
+            await using var store = new Hiker.Pro.State.SqliteStateStore(new Hiker.Pro.State.ProjectLayout(root));
+            var evidence = await store.ReadAsync(projectId, Hiker.Pro.State.EntityKinds.Evidence, Hiker.Pro.State.StateLifecycle.Valid, 16);
+            Assert.Contains(evidence, item =>
+                item.PayloadJson.Contains("field://rc11-live-adoption", StringComparison.Ordinal) &&
+                item.PayloadJson.Contains("field://runtime-context-check", StringComparison.Ordinal));
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
     private static async Task<CliResult> RunCliAsync(string root, params string[] arguments)
     {
         var repository = FindRepositoryRoot();

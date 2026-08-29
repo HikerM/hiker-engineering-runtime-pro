@@ -12,8 +12,10 @@ public sealed class LiveTurnLifecycleService(
     ProjectBootstrapService bootstrap,
     TimeProvider? timeProvider = null)
 {
+    private static readonly IReadOnlyList<string> AcceptedTerminalOutcomes =
+        new[] { "TURN_TERMINAL", "NATURAL_CHECKPOINT", "INTERRUPTED_UNKNOWN" };
     private static readonly IReadOnlySet<string> TerminalOutcomes = new HashSet<string>(
-        new[] { "TURN_TERMINAL", "NATURAL_CHECKPOINT", "INTERRUPTED_UNKNOWN" },
+        AcceptedTerminalOutcomes,
         StringComparer.Ordinal);
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
@@ -411,12 +413,37 @@ public sealed class LiveTurnLifecycleService(
     private static void Validate(LiveTurnCheckpointRequest request)
     {
         var outcome = request.Outcome.Trim().ToUpperInvariant();
-        if (string.IsNullOrWhiteSpace(request.Provider) || request.Provider.Length > 64 ||
-            string.IsNullOrWhiteSpace(request.ProviderSessionId) || request.ProviderSessionId.Length > 512 ||
-            !TerminalOutcomes.Contains(outcome) ||
-            request.MaxContextBytes is < 4096 or > 48_000)
+        if (string.IsNullOrWhiteSpace(request.Provider) || request.Provider.Length > 64)
         {
-            throw new ArgumentException("Live turn checkpoint request is invalid", nameof(request));
+            throw new LiveTurnCheckpointValidationException(
+                "INVALID_CHECKPOINT_PROVIDER",
+                "provider",
+                "Checkpoint provider must contain 1 to 64 characters");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ProviderSessionId) || request.ProviderSessionId.Length > 512)
+        {
+            throw new LiveTurnCheckpointValidationException(
+                "INVALID_PROVIDER_SESSION_ID",
+                "provider_session_id",
+                "Checkpoint provider session ID must contain 1 to 512 characters");
+        }
+
+        if (!TerminalOutcomes.Contains(outcome))
+        {
+            throw new LiveTurnCheckpointValidationException(
+                "INVALID_CHECKPOINT_OUTCOME",
+                "outcome",
+                $"Checkpoint outcome must be one of: {string.Join(", ", AcceptedTerminalOutcomes)}",
+                AcceptedTerminalOutcomes);
+        }
+
+        if (request.MaxContextBytes is < 4096 or > 48_000)
+        {
+            throw new LiveTurnCheckpointValidationException(
+                "INVALID_MAX_CONTEXT_BYTES",
+                "max_context_bytes",
+                "Checkpoint max context bytes must be between 4096 and 48000");
         }
     }
 

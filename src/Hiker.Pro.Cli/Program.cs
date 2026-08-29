@@ -74,6 +74,42 @@ catch (Hiker.Pro.State.ProjectBootstrapException exception)
     }
     return CliExitCodes.Blocked;
 }
+catch (LiveTurnCheckpointValidationException exception)
+{
+    if (jsonMode)
+    {
+        CliMachineContract.WriteFailure(
+            Console.Out,
+            options,
+            args[0],
+            "USAGE_ERROR",
+            CliExitCodes.Usage,
+            ProRuntimeStates.RequiredBlocked,
+            new
+            {
+                error = exception.GetType().Name,
+                reason_code = exception.ReasonCode,
+                invalid_field = exception.Field,
+                accepted_values = exception.AcceptedValues,
+                message = exception.Message
+            });
+        Console.Error.WriteLine($"hiker: USAGE_ERROR: {exception.ReasonCode}: {exception.Message}");
+    }
+    else
+    {
+        Console.Error.WriteLine(JsonSerializer.Serialize(new
+        {
+            ok = false,
+            status = "USAGE_ERROR",
+            error = exception.GetType().Name,
+            reason_code = exception.ReasonCode,
+            invalid_field = exception.Field,
+            accepted_values = exception.AcceptedValues,
+            message = exception.Message
+        }, options));
+    }
+    return CliExitCodes.Usage;
+}
 catch (ArgumentException exception)
 {
     if (jsonMode)

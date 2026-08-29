@@ -435,6 +435,50 @@ public sealed class LiveSessionAdoptionTests
     }
 
     [Fact]
+    public async Task SameProviderSession_TaskSwitch_ArchivesPriorRuntimeWithoutSecondWriter()
+    {
+        await using var project = await TestProject.CreateAsync(ProjectId);
+        await SeedCurrentWorkAsync(project);
+        var service = Service(project);
+        var first = await service.AdoptAsync(Request(boundary: "NEW_TASK"));
+        Assert.Equal(LiveAdoptionStatuses.Adopted, first.Status);
+        await SeedAsync(
+            project,
+            EntityKinds.Task,
+            "task-next",
+            "{\"task_id\":\"task-next\",\"goal_id\":\"goal-current\",\"status\":\"RUNNING\",\"goal_revision\":3}");
+
+        var switched = await service.AdoptAsync(new LiveAdoptionRequest(
+            "codex",
+            "provider-session-secret",
+            "NEW_TASK",
+            "goal-current",
+            "task-next"));
+
+        Assert.Equal(LiveAdoptionStatuses.Adopted, switched.Status);
+        Assert.Equal("task-next", switched.TaskId);
+        var oldTask = await project.Store.ReadAsync(new StateKey(ProjectId, EntityKinds.Task, "task-current"));
+        var oldOwnership = await project.Store.ReadAsync(new StateKey(ProjectId, EntityKinds.Ownership, "task-current"));
+        var activeOwnerships = await project.Store.ReadAsync(ProjectId, EntityKinds.Ownership, StateLifecycle.Valid, 8);
+        var oldEdges = await project.Store.QueryDependenciesBoundedAsync(
+            ProjectId,
+            EntityKinds.Task,
+            "task-current",
+            outgoing: true,
+            limit: 32);
+        var bindings = await project.Store.ReadAsync(ProjectId, EntityKinds.ProviderSessionBinding, StateLifecycle.Valid, 4);
+
+        Assert.Equal(StateLifecycle.Archived, oldTask?.Lifecycle);
+        Assert.Contains("INTERRUPTED_UNKNOWN", oldTask?.PayloadJson, StringComparison.Ordinal);
+        Assert.Equal(StateLifecycle.Archived, oldOwnership?.Lifecycle);
+        Assert.Single(activeOwnerships);
+        Assert.Equal("task-next", activeOwnerships[0].Key.EntityId);
+        Assert.DoesNotContain(oldEdges, static edge => edge.Lifecycle == StateLifecycle.Valid);
+        Assert.Single(bindings);
+        Assert.Contains("task-next", bindings[0].PayloadJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DifferentProviderSession_WaitsUntilPriorSessionCheckpointThenReusesSameTask()
     {
         await using var project = await TestProject.CreateAsync(ProjectId);
