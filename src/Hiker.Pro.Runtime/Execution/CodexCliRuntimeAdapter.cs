@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Hiker.Pro.Safety;
 
 namespace Hiker.Pro.Execution;
 
@@ -11,7 +12,11 @@ public sealed record CodexCliAdapterOptions(
     string Sandbox = "workspace-write",
     string? Model = null,
     TimeSpan? StartTimeout = null,
-    int MaxInstructionBytes = 65_536);
+    int MaxInstructionBytes = 65_536,
+    int MaxEventLineCharacters = 256 * 1024,
+    long MaxEventSegmentBytes = 8 * 1024 * 1024,
+    long MaxErrorSegmentBytes = 2 * 1024 * 1024,
+    int MaxHotSegments = 4);
 
 public sealed record CodexCliProbeResult(bool Available, string Version, string Status);
 
@@ -44,11 +49,9 @@ public sealed class CodexCliRuntimeAdapter : IExecutionRuntimeAdapter, IAsyncDis
         start.ArgumentList.Add("--version");
         try
         {
-            using var process = Process.Start(start) ?? throw new InvalidOperationException("Unable to start Codex CLI");
-            var output = process.StandardOutput.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            var version = (await output.ConfigureAwait(false)).Trim();
-            return new CodexCliProbeResult(process.ExitCode == 0, version, process.ExitCode == 0 ? "AVAILABLE" : "FAILED");
+            var result = await BoundedProcess.RunAsync(start, 64 * 1024, 64 * 1024, cancellationToken).ConfigureAwait(false);
+            var version = result.StandardOutput.Trim();
+            return new CodexCliProbeResult(result.ExitCode == 0, version, result.ExitCode == 0 ? "AVAILABLE" : "FAILED");
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
@@ -271,11 +274,11 @@ public sealed class CodexCliRuntimeAdapter : IExecutionRuntimeAdapter, IAsyncDis
         start.ArgumentList.Add("-");
         var process = Process.Start(start) ?? throw new InvalidOperationException("Unable to start Codex CLI");
         var discoveredSession = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var events = new FileStream(EventPath(request), FileMode.Append, FileAccess.Write, FileShare.Read, 4096, FileOptions.Asynchronous | FileOptions.WriteThrough);
-        var errors = new FileStream(ErrorPath(request), FileMode.Append, FileAccess.Write, FileShare.Read, 4096, FileOptions.Asynchronous | FileOptions.WriteThrough);
+        var events = new BoundedSegmentWriter(EventPath(request), _options.MaxEventSegmentBytes, _options.MaxHotSegments);
+        var errors = new BoundedSegmentWriter(ErrorPath(request), _options.MaxErrorSegmentBytes, Math.Min(2, _options.MaxHotSegments));
         var lifetime = new CancellationTokenSource();
-        var outputPump = PumpOutputAsync(process.StandardOutput, events, discoveredSession, lifetime.Token);
-        var errorPump = PumpTextAsync(process.StandardError, errors, lifetime.Token);
+        var outputPump = PumpOutputAsync(process.StandardOutput, events, discoveredSession, _options.MaxEventLineCharacters, lifetime.Token);
+        var errorPump = PumpTextAsync(process.StandardError, errors, _options.MaxEventLineCharacters, lifetime.Token);
         var active = new ActiveProcess(process, events, errors, outputPump, errorPump, lifetime);
         _active[handle.RuntimeId] = active;
         await process.StandardInput.WriteAsync(prompt.AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -320,13 +323,13 @@ public sealed class CodexCliRuntimeAdapter : IExecutionRuntimeAdapter, IAsyncDis
         return prompt;
     }
 
-    private static async Task PumpOutputAsync(StreamReader reader, Stream output, TaskCompletionSource<string> session, CancellationToken cancellationToken)
+    private static Task PumpOutputAsync(StreamReader reader, BoundedSegmentWriter output, TaskCompletionSource<string> session, int maxLineCharacters, CancellationToken cancellationToken)
     {
-        await using var writer = new StreamWriter(output, new UTF8Encoding(false), leaveOpen: true);
-        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+        return PumpLinesAsync(reader, maxLineCharacters, async (line, truncated, observed) =>
         {
-            await writer.WriteLineAsync(line.AsMemory(), cancellationToken).ConfigureAwait(false);
-            await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            var stored = truncated ? JsonSerializer.Serialize(new { type = "hiker.output_truncated", observed_characters = observed, reason_code = "SINGLE_LINE_BUDGET_EXCEEDED" }) : line;
+            await output.WriteLineAsync(stored, cancellationToken).ConfigureAwait(false);
+            if (truncated) return;
             try
             {
                 using var document = JsonDocument.Parse(line);
@@ -335,19 +338,41 @@ public sealed class CodexCliRuntimeAdapter : IExecutionRuntimeAdapter, IAsyncDis
                     session.TrySetResult(value);
             }
             catch (JsonException) { }
-        }
-
-        session.TrySetException(new InvalidOperationException("Codex exited before reporting a session ID"));
+        }, () => session.TrySetException(new InvalidOperationException("Codex exited before reporting a session ID")), cancellationToken);
     }
 
-    private static async Task PumpTextAsync(StreamReader reader, Stream output, CancellationToken cancellationToken)
+    private static Task PumpTextAsync(StreamReader reader, BoundedSegmentWriter output, int maxLineCharacters, CancellationToken cancellationToken)
     {
-        await using var writer = new StreamWriter(output, new UTF8Encoding(false), leaveOpen: true);
-        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+        return PumpLinesAsync(reader, maxLineCharacters, async (line, truncated, observed) =>
         {
-            await writer.WriteLineAsync(line.AsMemory(), cancellationToken).ConfigureAwait(false);
-            await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            var stored = truncated ? $"[OUTPUT_TRUNCATED observed_characters={observed}]" : line;
+            await output.WriteLineAsync(stored, cancellationToken).ConfigureAwait(false);
+        }, null, cancellationToken);
+    }
+
+    private static async Task PumpLinesAsync(StreamReader reader, int maxLineCharacters, Func<string, bool, int, Task> onLine, Action? onComplete, CancellationToken cancellationToken)
+    {
+        var buffer = new char[8192]; var line = new StringBuilder(Math.Min(maxLineCharacters, 8192)); var observed = 0; var truncated = false;
+        async Task FlushAsync()
+        {
+            if (observed == 0 && line.Length == 0) return;
+            if (line.Length > 0 && line[^1] == '\r') line.Length--;
+            await onLine(line.ToString(), truncated, observed).ConfigureAwait(false);
+            line.Clear(); observed = 0; truncated = false;
         }
+        while (true)
+        {
+            var count = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+            if (count == 0) break;
+            for (var index = 0; index < count; index++)
+            {
+                var value = buffer[index];
+                if (value == '\n') { await FlushAsync().ConfigureAwait(false); continue; }
+                observed++;
+                if (line.Length < maxLineCharacters) line.Append(value); else truncated = true;
+            }
+        }
+        await FlushAsync().ConfigureAwait(false); onComplete?.Invoke();
     }
 
     private static async Task StopProcessAsync(ActiveProcess active, CancellationToken cancellationToken)
@@ -379,7 +404,10 @@ public sealed class CodexCliRuntimeAdapter : IExecutionRuntimeAdapter, IAsyncDis
     private static IEnumerable<string> ExistingRefs(RuntimeStartRequest request)
     {
         foreach (var path in new[] { EventPath(request), ErrorPath(request) })
+        {
             if (File.Exists(path)) yield return Path.GetRelativePath(Path.Combine(request.WorkspacePath, ".ai"), path).Replace('\\', '/');
+            for (var index = 1; index <= 4; index++) if (File.Exists($"{path}.{index}")) yield return Path.GetRelativePath(Path.Combine(request.WorkspacePath, ".ai"), $"{path}.{index}").Replace('\\', '/');
+        }
     }
 
     private static string ResolveAiRef(string root, string reference)
@@ -388,8 +416,10 @@ public sealed class CodexCliRuntimeAdapter : IExecutionRuntimeAdapter, IAsyncDis
         var aiRoot = Path.GetFullPath(Path.Combine(root, ".ai"));
         var normalized = reference.StartsWith(".ai/", StringComparison.Ordinal) ? reference[4..] : reference;
         var path = Path.GetFullPath(Path.Combine(aiRoot, normalized.Replace('/', Path.DirectorySeparatorChar)));
-        var relative = Path.GetRelativePath(aiRoot, path);
-        if (relative == ".." || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) || !File.Exists(path))
+        try { path = TraversalGuard.EnsureContained(aiRoot, path, requireExisting: true); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        { throw new InvalidDataException("Runtime input reference is missing or escapes .ai", exception); }
+        if (!File.Exists(path))
             throw new InvalidDataException("Runtime input reference is missing or escapes .ai");
         return path;
     }
@@ -404,8 +434,8 @@ public sealed class CodexCliRuntimeAdapter : IExecutionRuntimeAdapter, IAsyncDis
 
     private sealed record ActiveProcess(
         Process Process,
-        Stream Events,
-        Stream Errors,
+        BoundedSegmentWriter Events,
+        BoundedSegmentWriter Errors,
         Task OutputPump,
         Task ErrorPump,
         CancellationTokenSource Lifetime);

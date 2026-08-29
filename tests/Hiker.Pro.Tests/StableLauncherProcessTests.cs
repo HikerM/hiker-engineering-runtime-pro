@@ -48,7 +48,7 @@ public sealed class StableLauncherProcessTests
         }
         finally
         {
-            if (Directory.Exists(home)) Directory.Delete(home, recursive: true);
+            await DeleteDirectoryWithRetryAsync(home);
         }
     }
 
@@ -118,8 +118,30 @@ public sealed class StableLauncherProcessTests
         }
         finally
         {
-            if (Directory.Exists(home)) Directory.Delete(home, recursive: true);
+            await DeleteDirectoryWithRetryAsync(home);
         }
+    }
+
+    private static async Task DeleteDirectoryWithRetryAsync(string path)
+    {
+        const int attempts = 20;
+        for (var attempt = 1; attempt <= attempts; attempt++)
+        {
+            if (!Directory.Exists(path)) return;
+            try
+            {
+                Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch (Exception exception) when (
+                attempt < attempts &&
+                exception is IOException or UnauthorizedAccessException)
+            {
+                await Task.Delay(50 * attempt);
+            }
+        }
+
+        Directory.Delete(path, recursive: true);
     }
 
     private static async Task<ProcessResult> RunAsync(string executable, string home, params string[] arguments)

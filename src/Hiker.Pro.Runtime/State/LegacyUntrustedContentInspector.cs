@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Diagnostics;
 
 namespace Hiker.Pro.State;
 
@@ -10,6 +11,11 @@ internal sealed record UntrustedContentInspection(
 internal static class LegacyUntrustedContentInspector
 {
     private const int MaxEntries = 10_000;
+    private const int MaxDirectories = 2_000;
+    private const int MaxDepth = 32;
+    private const int MaxEntriesPerDirectory = 4_096;
+    private const long MaxObservedBytes = 10L * 1024 * 1024 * 1024;
+    private const int MaxElapsedMilliseconds = 10_000;
     private const long MaxJsonInspectionBytes = 1_048_576;
 
     private static readonly IReadOnlySet<string> AuthorityFileNames = new HashSet<string>(
@@ -47,16 +53,19 @@ internal static class LegacyUntrustedContentInspector
     {
         var findings = new List<string>();
         var fingerprintItems = new List<string>();
-        var pending = new Stack<string>();
-        pending.Push(topLevelItem);
+        var pending = new Stack<(string Path, int Depth)>();
+        pending.Push((topLevelItem, 0));
         var discovered = 1;
         var limitExceeded = false;
+        var directories = 0; long observedBytes = 0; var timer = Stopwatch.StartNew();
 
         try
         {
             while (pending.Count > 0)
             {
-                var current = pending.Pop();
+                var (current, depth) = pending.Pop();
+                if (depth > MaxDepth || timer.ElapsedMilliseconds > MaxElapsedMilliseconds)
+                { AddFinding(findings, $"{RelativeOrName(layout, topLevelItem)}:TRAVERSAL_LIMIT_REACHED"); break; }
                 if (!TryRelative(layout, current, out var relative))
                 {
                     AddFinding(findings, $"{Path.GetFileName(current)}:PATH_ESCAPE");
@@ -71,8 +80,12 @@ internal static class LegacyUntrustedContentInspector
 
                 if (Directory.Exists(current))
                 {
+                    directories++;
+                    if (directories > MaxDirectories) { AddFinding(findings, $"{RelativeOrName(layout, topLevelItem)}:DIRECTORY_LIMIT_EXCEEDED:{MaxDirectories}"); break; }
                     fingerprintItems.Add($"D\0{relative}");
-                    foreach (var child in Directory.EnumerateFileSystemEntries(current, "*", SearchOption.TopDirectoryOnly))
+                    var children = Directory.EnumerateFileSystemEntries(current, "*", SearchOption.TopDirectoryOnly).Take(MaxEntriesPerDirectory + 1).ToArray();
+                    if (children.Length > MaxEntriesPerDirectory) { AddFinding(findings, $"{relative}:INVENTORY_LIMIT_EXCEEDED:TRAVERSAL_LIMIT_REACHED:entries_per_directory:{MaxEntriesPerDirectory}"); break; }
+                    foreach (var child in children)
                     {
                         discovered++;
                         if (discovered > MaxEntries)
@@ -82,7 +95,7 @@ internal static class LegacyUntrustedContentInspector
                             break;
                         }
 
-                        pending.Push(child);
+                        pending.Push((child, depth + 1));
                     }
 
                     if (limitExceeded) break;
@@ -90,6 +103,8 @@ internal static class LegacyUntrustedContentInspector
                 }
 
                 var file = new FileInfo(current);
+                observedBytes += file.Length;
+                if (observedBytes > MaxObservedBytes) { AddFinding(findings, $"{relative}:BYTE_LIMIT_EXCEEDED:{MaxObservedBytes}"); break; }
                 fingerprintItems.Add($"F\0{relative}\0{file.Length}\0{file.LastWriteTimeUtc.Ticks}");
                 if (TryFindAuthorityConflict(current, file.Length, out var reason))
                 {

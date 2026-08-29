@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Hiker.Pro.Safety;
 
 namespace Hiker.Pro.Trust;
 
@@ -56,7 +57,8 @@ public sealed class PackageIntegrityVerifier(SignedEnvelopeVerifier verifier)
                 allowed.Add(Resolve(root, relative));
             }
         }
-        foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        var (packageFiles, _) = TraversalGuard.EnumerateFiles(root, new TraversalBudget(MaxDepth: 12, MaxDirectories: 2048, MaxEntries: 20000, MaxFiles: 10000, MaxObservedBytes: 4L * 1024 * 1024 * 1024, MaxElapsedMilliseconds: 30000));
+        foreach (var path in packageFiles)
         {
             var full = Path.GetFullPath(path);
             if (!expectedPaths.Contains(full) && !allowed.Contains(full))
@@ -91,11 +93,7 @@ public sealed class PackageIntegrityVerifier(SignedEnvelopeVerifier verifier)
     private static string Resolve(string root, string relativePath)
     {
         if (Path.IsPathRooted(relativePath)) throw new InvalidDataException("Package paths must be relative");
-        var path = Path.GetFullPath(Path.Combine(root, relativePath));
-        var relative = Path.GetRelativePath(root, path);
-        if (relative == ".." || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-            throw new InvalidDataException("Package artifact escapes package root");
-        return path;
+        return TraversalGuard.EnsureContained(root, Path.Combine(root, relativePath), requireExisting: false);
     }
 
     private static bool FixedEquals(string left, string right) => left.Length == right.Length &&

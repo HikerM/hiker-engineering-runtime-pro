@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Hiker.Pro.Safety;
 using Microsoft.Data.Sqlite;
 
 namespace Hiker.Pro.State;
@@ -294,7 +295,8 @@ public sealed partial class SqliteStateStore
         var referencedHashes = artifactFacts.Select(static value => value.Hash).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (Directory.Exists(_layout.ArtifactsRoot))
         {
-            foreach (var path in Directory.EnumerateFiles(_layout.ArtifactsRoot, "*", SearchOption.AllDirectories))
+            var (artifactPaths, _) = TraversalGuard.EnumerateFiles(_layout.ArtifactsRoot, new TraversalBudget(MaxDepth: 4, MaxDirectories: 512, MaxEntries: 100_000, MaxFiles: 100_000, MaxObservedBytes: 100L * 1024 * 1024 * 1024, MaxElapsedMilliseconds: 30_000));
+            foreach (var path in artifactPaths)
             {
                 var name = Path.GetFileName(path);
                 if (IsSha256Name(name) && !referencedHashes.Contains(name))
@@ -358,7 +360,8 @@ public sealed partial class SqliteStateStore
         var orphanArtifacts = 0;
         if (Directory.Exists(_layout.ArtifactsRoot))
         {
-            foreach (var path in Directory.EnumerateFiles(_layout.ArtifactsRoot, "*", SearchOption.AllDirectories))
+            var (artifactPaths, _) = TraversalGuard.EnumerateFiles(_layout.ArtifactsRoot, new TraversalBudget(MaxDepth: 4, MaxDirectories: 512, MaxEntries: 100_000, MaxFiles: 100_000, MaxObservedBytes: 100L * 1024 * 1024 * 1024, MaxElapsedMilliseconds: 30_000));
+            foreach (var path in artifactPaths)
             {
                 var info = new FileInfo(path);
                 if (info.LastWriteTimeUtc < olderThan.UtcDateTime && IsSha256Name(info.Name) && !referenced.Contains(info.Name))

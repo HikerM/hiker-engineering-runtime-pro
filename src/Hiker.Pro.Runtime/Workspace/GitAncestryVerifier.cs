@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Hiker.Pro.Safety;
 
 namespace Hiker.Pro.Workspace;
 
@@ -32,17 +33,13 @@ public sealed class GitAncestryVerifier : IGitAncestryVerifier
         start.ArgumentList.Add("--is-ancestor");
         start.ArgumentList.Add(ancestorCommit);
         start.ArgumentList.Add(descendantRef);
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("Unable to start git ancestry verification");
-        var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        _ = await stdout.ConfigureAwait(false);
-        var error = (await stderr.ConfigureAwait(false)).Trim();
-        return process.ExitCode switch
+        var result = await BoundedProcess.RunAsync(start, 16 * 1024, 64 * 1024, cancellationToken).ConfigureAwait(false);
+        var error = result.StandardError.Trim();
+        return result.ExitCode switch
         {
             0 => true,
             1 => false,
-            _ => throw new InvalidOperationException($"git merge-base failed with exit {process.ExitCode}: {error}")
+            _ => throw new InvalidOperationException($"git merge-base failed with exit {result.ExitCode}: {error}")
         };
     }
 }

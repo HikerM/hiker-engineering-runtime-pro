@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Diagnostics;
 
 namespace Hiker.Pro.State;
 
@@ -10,6 +11,11 @@ internal sealed record LegacyAiInspection(
 internal static class LegacyAiInventoryInspector
 {
     private const int MaxFiles = 100_000;
+    private const int MaxDirectories = 10_000;
+    private const int MaxDepth = 32;
+    private const int MaxEntriesPerDirectory = 4_096;
+    private const long MaxBytes = 100L * 1024 * 1024 * 1024;
+    private const int MaxElapsedMilliseconds = 30_000;
 
     private static readonly IReadOnlyDictionary<string, DirectoryPolicy> SemanticDirectories =
         new Dictionary<string, DirectoryPolicy>(StringComparer.OrdinalIgnoreCase)
@@ -50,7 +56,14 @@ internal static class LegacyAiInventoryInspector
         var fingerprintItems = new List<string>();
         foreach (var directoryPolicy in SemanticDirectories)
         {
-            var absolute = layout.ResolveAiRelativePath(directoryPolicy.Key);
+            string absolute;
+            try { absolute = layout.ResolveAiRelativePath(directoryPolicy.Key); }
+            catch (InvalidDataException)
+            {
+                AddUnknown(unknown, $"{directoryPolicy.Key}:REPARSE_OR_PATH_ESCAPE");
+                entries.Add(UnknownEntry(directoryPolicy.Key, "REPARSE_OR_PATH_ESCAPE", "NO_FOLLOW_BLOCKED"));
+                continue;
+            }
             if (!Directory.Exists(absolute)) continue;
 
             fingerprintItems.Add($"D\0{directoryPolicy.Key}");
@@ -110,15 +123,24 @@ internal static class LegacyAiInventoryInspector
         }
 
         var count = 0;
-        var scanned = 0;
+        var scanned = 0; var directories = 0; long bytes = 0; var timer = Stopwatch.StartNew();
         try
         {
-            var pending = new Stack<string>();
-            pending.Push(directory);
+            var pending = new Stack<(string Path, int Depth)>();
+            pending.Push((directory, 0));
             while (pending.Count > 0 && scanned <= MaxFiles)
             {
-                var current = pending.Pop();
-                foreach (var item in Directory.EnumerateFileSystemEntries(current, "*", SearchOption.TopDirectoryOnly))
+                var (current, depth) = pending.Pop(); directories++;
+                if (directories > MaxDirectories || depth > MaxDepth || timer.ElapsedMilliseconds > MaxElapsedMilliseconds)
+                {
+                    AddUnknown(unknown, $"{relativeDirectory}:TRAVERSAL_LIMIT_REACHED"); entries.Add(UnknownEntry(relativeDirectory, "TRAVERSAL_LIMIT_REACHED", "BOUNDED_SCAN_BLOCKED")); break;
+                }
+                var children = Directory.EnumerateFileSystemEntries(current, "*", SearchOption.TopDirectoryOnly).Take(MaxEntriesPerDirectory + 1).ToArray();
+                if (children.Length > MaxEntriesPerDirectory)
+                {
+                    AddUnknown(unknown, $"{relativeDirectory}:INVENTORY_LIMIT_EXCEEDED:TRAVERSAL_LIMIT_REACHED:entries_per_directory:{MaxEntriesPerDirectory}"); entries.Add(UnknownEntry(relativeDirectory, "TRAVERSAL_LIMIT_REACHED", "BOUNDED_SCAN_BLOCKED")); break;
+                }
+                foreach (var item in children)
                 {
                     scanned++;
                     if (scanned > MaxFiles)
@@ -139,12 +161,14 @@ internal static class LegacyAiInventoryInspector
                     if (Directory.Exists(item))
                     {
                         fingerprintItems.Add($"D\0{relative}");
-                        if (directoryPolicy.OpaquePreserved) pending.Push(item);
+                        if (directoryPolicy.OpaquePreserved) pending.Push((item, depth + 1));
                         else PreserveUncatalogued(layout, item, relative, entries, unknown, fingerprintItems);
                         continue;
                     }
 
                     var file = new FileInfo(item);
+                    bytes += file.Length;
+                    if (bytes > MaxBytes) { AddUnknown(unknown, $"{relativeDirectory}:BYTE_LIMIT_EXCEEDED:{MaxBytes}"); entries.Add(UnknownEntry(relativeDirectory, "TRAVERSAL_LIMIT_REACHED", "BOUNDED_SCAN_BLOCKED")); break; }
                     fingerprintItems.Add($"F\0{relative}\0{file.Length}\0{file.LastWriteTimeUtc.Ticks}");
                     if (Community518SourceCatalog.TryResolve(relative, item, out var source))
                     {
@@ -189,7 +213,9 @@ internal static class LegacyAiInventoryInspector
         List<string> unknown,
         List<string> fingerprintItems)
     {
-        foreach (var item in Directory.EnumerateFileSystemEntries(layout.AiRoot, "*", SearchOption.TopDirectoryOnly))
+        var topLevel = Directory.EnumerateFileSystemEntries(layout.AiRoot, "*", SearchOption.TopDirectoryOnly).Take(258).ToArray();
+        if (topLevel.Length > 257) { AddUnknown(unknown, ".ai:TOP_LEVEL_LIMIT_EXCEEDED:257"); entries.Add(UnknownEntry(".ai", "TRAVERSAL_LIMIT_REACHED", "BOUNDED_SCAN_BLOCKED")); }
+        foreach (var item in topLevel.Take(257))
         {
             var name = Path.GetFileName(item);
             if (KnownTopLevelNames.Contains(name))

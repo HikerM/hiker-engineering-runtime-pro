@@ -417,7 +417,9 @@ public sealed class ProjectBootstrapService(
         var cache = 0;
         var temporary = 0;
         var unknown = new List<string>(legacyInventory.UnknownItems);
-        foreach (var item in Directory.EnumerateFileSystemEntries(layout.AiRoot, "*", SearchOption.TopDirectoryOnly))
+        var topLevel = Directory.EnumerateFileSystemEntries(layout.AiRoot, "*", SearchOption.TopDirectoryOnly).Take(258).ToArray();
+        if (topLevel.Length > 257) unknown.Add(".ai:TOP_LEVEL_LIMIT_EXCEEDED:257");
+        foreach (var item in topLevel.Take(257))
         {
             var name = Path.GetFileName(item);
             if (name is "state" or "artifacts" or "exports") authoritative++;

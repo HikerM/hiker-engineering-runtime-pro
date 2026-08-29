@@ -1,3 +1,5 @@
+using Hiker.Pro.Safety;
+
 namespace Hiker.Pro.State;
 
 public sealed class ProjectLayout
@@ -39,13 +41,7 @@ public sealed class ProjectLayout
         }
 
         var resolved = Path.GetFullPath(Path.Combine(AiRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
-        var relative = Path.GetRelativePath(AiRoot, resolved);
-        if (relative == ".." || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-        {
-            throw new InvalidDataException("State reference escapes .ai");
-        }
-
-        return resolved;
+        return TraversalGuard.EnsureContained(AiRoot, resolved, requireExisting: false);
     }
 
     public void EnsureDirectories()

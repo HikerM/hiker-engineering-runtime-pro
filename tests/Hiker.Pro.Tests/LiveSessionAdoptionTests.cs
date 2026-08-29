@@ -124,6 +124,41 @@ public sealed class LiveSessionAdoptionTests
     }
 
     [Fact]
+    public async Task CommunityTaskPlanVersion_DoesNotOverrideCurrentGoalRevisionOnRetry()
+    {
+        await using var project = await TestProject.CreateAsync(ProjectId);
+        var governance = Path.Combine(project.Layout.AiRoot, "governance");
+        var runtime = Path.Combine(project.Layout.AiRoot, "runtime");
+        Directory.CreateDirectory(governance);
+        Directory.CreateDirectory(runtime);
+        await File.WriteAllTextAsync(
+            Path.Combine(governance, "goal-contract.json"),
+            "{\"project_id\":\"field-goal\",\"revision\":2}");
+        var taskPath = Path.Combine(runtime, "task.json");
+        await File.WriteAllTextAsync(
+            taskPath,
+            "{\"id\":\"field-task\",\"status\":\"IN_PROGRESS\",\"plan_version\":1}");
+        var service = Service(project);
+        Assert.Equal(LiveAdoptionStatuses.Adopted, (await service.AdoptAsync(Request())).Status);
+        var before = await project.Store.GetMetricsAsync();
+
+        const string advancedTask = "{\"id\":\"field-task\",\"status\":\"PREVIEW_PASS_CREATE_ROLLBACK_READY\",\"plan_version\":144}";
+        await File.WriteAllTextAsync(taskPath, advancedTask);
+        var retry = await service.AdoptAsync(Request());
+        var after = await project.Store.GetMetricsAsync();
+        var task = await project.Store.ReadAsync(new StateKey(ProjectId, EntityKinds.Task, "field-task"));
+        var bindings = await project.Store.ReadAsync(ProjectId, EntityKinds.ProviderSessionBinding, lifecycle: null, limit: 8);
+
+        Assert.Equal(LiveAdoptionStatuses.AlreadyAdopted, retry.Status);
+        Assert.True(retry.Idempotent);
+        Assert.Equal(0, retry.StateWrites);
+        Assert.Equal(2, task?.GoalRevision);
+        Assert.Equal(before, after);
+        Assert.Single(bindings, static item => item.Lifecycle == StateLifecycle.Valid);
+        Assert.Equal(advancedTask, await File.ReadAllTextAsync(taskPath));
+    }
+
+    [Fact]
     public async Task LiveRuntimeLease_WaitsAndDoesNotAdopt()
     {
         await using var project = await TestProject.CreateAsync(ProjectId);

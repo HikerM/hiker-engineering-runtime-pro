@@ -55,7 +55,23 @@ public sealed class ProjectResumeService(IStateStore stateStore)
             RuntimeLeases = summary.RuntimeLeases.Take(8).ToArray(),
             Truncated = true
         };
-        return bounded with { EncodedBytes = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(bounded)) };
+        var boundedBytes = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(bounded));
+        if (boundedBytes <= maxBytes) return bounded with { EncodedBytes = boundedBytes };
+        var minimal = bounded with
+        {
+            OpenTasks = Array.Empty<ContextItem>(),
+            BlockedTasks = Array.Empty<ContextItem>(),
+            LatestDecisions = Array.Empty<ContextItem>(),
+            ValidEvidence = Array.Empty<ContextItem>(),
+            StaleEvidence = Array.Empty<ContextItem>(),
+            ActiveWorktrees = Array.Empty<ContextItem>(),
+            RuntimeLeases = Array.Empty<ContextItem>(),
+            RecommendedNextAction = "CONTEXT_BUDGET_REACHED_READ_EXPLICIT_REFERENCES_ONLY",
+            Truncated = true
+        };
+        var minimalBytes = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(minimal));
+        if (minimalBytes > maxBytes) minimal = minimal with { CurrentGoal = null };
+        return minimal with { EncodedBytes = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(minimal)) };
     }
 
     private static bool PayloadStatus(string payload, params string[] values)

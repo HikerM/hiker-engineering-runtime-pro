@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Hiker.Pro.Storage;
+using Hiker.Pro.Safety;
 using Microsoft.Data.Sqlite;
 
 namespace Hiker.Pro.State;
@@ -48,7 +49,6 @@ public sealed partial class SqliteStateStore
                 findings.Add(new HealthFinding("CORRUPT_ARTIFACT", "BLOCKED", artifact.ArtifactId, "SHA-256 mismatch", false));
                 continue;
             }
-            await RefreshArtifactVerificationAsync(connection, project, artifact, info, cancellationToken).ConfigureAwait(false);
         }
 
         var segments = await ReadDoctorSegmentsAsync(connection, project, mode, cancellationToken).ConfigureAwait(false);
@@ -180,9 +180,6 @@ public sealed partial class SqliteStateStore
             findings.Add(new HealthFinding("STATE_DB_CORRUPT", "BLOCKED", "state", value ?? "quick_check failed", false));
             return;
         }
-        await WriteFastDoctorReceiptAsync(
-            new FastDoctorReceipt(projectId, SqliteSchema.CurrentVersion, DatabaseStorageIdentity(), "OK", DateTimeOffset.UtcNow),
-            cancellationToken).ConfigureAwait(false);
     }
 
     private string DatabaseStorageIdentity()
@@ -291,7 +288,8 @@ public sealed partial class SqliteStateStore
     {
         var known = artifacts.Select(static value => value.Sha256).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (!Directory.Exists(_layout.ArtifactsRoot)) return;
-        foreach (var path in Directory.EnumerateFiles(_layout.ArtifactsRoot, "*", SearchOption.AllDirectories))
+        var (paths, _) = TraversalGuard.EnumerateFiles(_layout.ArtifactsRoot, new TraversalBudget(MaxDepth: 4, MaxDirectories: 512, MaxEntries: 100_000, MaxFiles: 100_000, MaxObservedBytes: 100L * 1024 * 1024 * 1024, MaxElapsedMilliseconds: 30_000));
+        foreach (var path in paths)
         {
             var name = Path.GetFileName(path);
             if (IsSha256Name(name) && !known.Contains(name)) findings.Add(new HealthFinding("ORPHAN_ARTIFACTS_FOUND", "REPAIRABLE", name, projectId, true));

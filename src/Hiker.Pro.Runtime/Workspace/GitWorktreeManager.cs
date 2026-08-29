@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Hiker.Pro.Safety;
 
 namespace Hiker.Pro.Workspace;
 
@@ -67,12 +68,10 @@ public sealed class GitWorktreeManager(IWorkspaceInspector inspector)
             CreateNoWindow = true
         };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("Unable to start git");
-        var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException($"git {arguments[0]} failed with exit {process.ExitCode}: {(await stderr.ConfigureAwait(false)).Trim()}");
-        return (await stdout.ConfigureAwait(false)).Trim();
+        var result = await BoundedProcess.RunAsync(start, 256 * 1024, 64 * 1024, cancellationToken).ConfigureAwait(false);
+        if (result.OutputTruncated) throw new TraversalLimitReachedException("git_output_bytes", new TraversalReceipt("TRAVERSAL_LIMIT_REACHED", "git_output_bytes", 0, 0, 0, result.ObservedOutputCharacters, 0, 0));
+        if (result.ExitCode != 0)
+            throw new InvalidOperationException($"git {arguments[0]} failed with exit {result.ExitCode}: {result.StandardError.Trim()}");
+        return result.StandardOutput.Trim();
     }
 }

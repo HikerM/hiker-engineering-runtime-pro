@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using Hiker.Pro.Safety;
 
 namespace Hiker.Pro.Workspace;
 
@@ -27,7 +28,7 @@ public sealed class GitWorkspaceInspector : IWorkspaceInspector
         var common = await GitAsync(requested, cancellationToken, "rev-parse", "--git-common-dir").ConfigureAwait(false);
         var head = await GitAsync(requested, cancellationToken, "rev-parse", "HEAD").ConfigureAwait(false);
         var branch = await GitAsync(requested, cancellationToken, "branch", "--show-current").ConfigureAwait(false);
-        var status = await GitAsync(requested, cancellationToken, "status", "--porcelain=v2", "--untracked-files=all").ConfigureAwait(false);
+        var status = await GitAsync(requested, cancellationToken, "status", "--porcelain=v2", "--untracked-files=all", "--", ".", ":(exclude).ai/**").ConfigureAwait(false);
         var canonicalRoot = Path.GetFullPath(root);
         var commonPath = Path.GetFullPath(Path.IsPathRooted(common) ? common : Path.Combine(canonicalRoot, common));
         return new WorkspaceSnapshot(
@@ -55,15 +56,14 @@ public sealed class GitWorkspaceInspector : IWorkspaceInspector
             start.ArgumentList.Add(argument);
         }
 
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("Unable to start git");
-        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        var output = (await outputTask.ConfigureAwait(false)).Trim();
-        var error = (await errorTask.ConfigureAwait(false)).Trim();
-        if (process.ExitCode != 0)
+        var result = await BoundedProcess.RunAsync(start, maxOutputCharacters: 2 * 1024 * 1024, maxErrorCharacters: 64 * 1024, cancellationToken).ConfigureAwait(false);
+        if (result.OutputTruncated)
+            throw new TraversalLimitReachedException("git_output_bytes", new TraversalReceipt("TRAVERSAL_LIMIT_REACHED", "git_output_bytes", 0, 0, 0, result.ObservedOutputCharacters, 0, 0));
+        var output = result.StandardOutput.Trim();
+        var error = result.StandardError.Trim();
+        if (result.ExitCode != 0)
         {
-            throw new InvalidOperationException($"git {arguments[0]} failed with exit {process.ExitCode}: {error}");
+            throw new InvalidOperationException($"git {arguments[0]} failed with exit {result.ExitCode}: {error}");
         }
 
         return output;

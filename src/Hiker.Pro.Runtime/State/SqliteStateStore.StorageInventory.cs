@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using Hiker.Pro.Storage;
+using Hiker.Pro.Safety;
+using Microsoft.Data.Sqlite;
 
 namespace Hiker.Pro.State;
 
@@ -20,9 +22,10 @@ public sealed partial class SqliteStateStore
             return new IncrementalMigrationInventoryResult("NO_AI_CONTENT", 0, 0, 0, Array.Empty<MigrationInventorySegment>());
         var directories = Directory.EnumerateDirectories(_layout.AiRoot, "*", SearchOption.TopDirectoryOnly)
             .Where(path => !CurrentStorageDirectories.Contains(Path.GetFileName(path)))
-            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase).ToArray();
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase).Take(257).ToArray();
         if (directories.Length > 256) throw new InvalidOperationException("Legacy inventory root budget is exhausted");
         var segments = new List<MigrationInventorySegment>();
+        var updates = new List<(MigrationInventorySegment Segment, string Identity)>();
         var scanned = 0;
         var reused = 0;
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -41,52 +44,30 @@ public sealed partial class SqliteStateStore
                 reused++;
                 continue;
             }
-            await UpsertInventorySegmentAsync(connection, observed, identity, cancellationToken).ConfigureAwait(false);
+            updates.Add((observed, identity));
             segments.Add(observed);
             scanned++;
         }
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        foreach (var update in updates)
+            await UpsertInventorySegmentAsync(connection, transaction, update.Segment, update.Identity, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return new IncrementalMigrationInventoryResult(scanned == 0 ? "UNCHANGED_REUSED" : "INCREMENTAL_UPDATED", scanned, reused, scanned, ContractCollections.Freeze(segments));
     }
 
     private MigrationInventorySegment ScanInventorySegment(string projectId, string root, string relativeRoot)
     {
-        var canonical = new StringBuilder();
-        long files = 0;
-        long bytes = 0;
-        var pending = new Stack<string>();
-        pending.Push(root);
-        while (pending.Count > 0)
+        var (files, receipt) = TraversalGuard.EnumerateFiles(root, new TraversalBudget());
+        using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var path in files.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
         {
-            var current = pending.Pop();
-            foreach (var path in Directory.EnumerateFileSystemEntries(current, "*", SearchOption.TopDirectoryOnly)
-                         .OrderBy(static value => value, StringComparer.OrdinalIgnoreCase))
-            {
-                var attributes = File.GetAttributes(path);
-                var relative = Path.GetRelativePath(root, path);
-                if (relative == ".." || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-                    throw new InvalidDataException("Legacy inventory path escapes its segment");
-                var normalized = relative.Replace(Path.DirectorySeparatorChar, '/');
-                if (attributes.HasFlag(FileAttributes.ReparsePoint))
-                {
-                    canonical.Append("R|").Append(normalized).Append('|').Append((long)attributes).Append('\n');
-                    continue;
-                }
-                if (Directory.Exists(path))
-                {
-                    canonical.Append("D|").Append(normalized).Append('|').Append(Directory.GetLastWriteTimeUtc(path).Ticks).Append('\n');
-                    pending.Push(path);
-                    continue;
-                }
-                files++;
-                if (files > 100_000) throw new InvalidOperationException("Legacy inventory segment file budget is exhausted");
-                var info = new FileInfo(path);
-                bytes += info.Length;
-                if (bytes > 100L * 1024 * 1024 * 1024) throw new InvalidOperationException("Legacy inventory segment byte budget is exhausted");
-                canonical.Append("F|").Append(normalized).Append('|').Append(info.Length).Append('|').Append(info.LastWriteTimeUtc.Ticks).Append('\n');
-            }
+            var relative = Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/');
+            var info = new FileInfo(path);
+            digest.AppendData(Encoding.UTF8.GetBytes($"F|{relative}|{info.Length}|{info.LastWriteTimeUtc.Ticks}\n"));
         }
-        var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString()))).ToLowerInvariant();
-        return new MigrationInventorySegment(projectId, relativeRoot, fingerprint, files, bytes, "VERIFIED", DateTimeOffset.UtcNow);
+        digest.AppendData(Encoding.UTF8.GetBytes($"M|{receipt.Directories}|{receipt.Entries}|{receipt.ReparsePoints}\n"));
+        var fingerprint = Convert.ToHexString(digest.GetHashAndReset()).ToLowerInvariant();
+        return new MigrationInventorySegment(projectId, relativeRoot, fingerprint, receipt.Files, receipt.ObservedBytes, "VERIFIED", DateTimeOffset.UtcNow);
     }
 
     private static MigrationInventorySegment IsolatedInventorySegment(string projectId, string relativeRoot, FileAttributes attributes)
@@ -114,12 +95,14 @@ public sealed partial class SqliteStateStore
     }
 
     private static async Task UpsertInventorySegmentAsync(
-        Microsoft.Data.Sqlite.SqliteConnection connection,
+        SqliteConnection connection,
+        SqliteTransaction transaction,
         MigrationInventorySegment segment,
         string rootIdentity,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO migration_inventory_segments(project_id,relative_root,root_identity,fingerprint,files,bytes,status,verified_at)
             VALUES($project,$root,$identity,$fingerprint,$files,$bytes,$status,$verified)

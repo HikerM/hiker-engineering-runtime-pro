@@ -1,9 +1,11 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Hiker.Pro.Safety;
 
 internal static class CliMachineContract
 {
     public const string ContractVersion = "hiker-cli/v1";
+    public const int MaxDocumentBytes = 256 * 1024;
 
     public static int WritePayload<T>(
         TextWriter output,
@@ -37,7 +39,7 @@ internal static class CliMachineContract
             envelope[property.Key] = property.Value?.DeepClone();
         }
 
-        output.WriteLine(envelope.ToJsonString(options));
+        output.WriteLine(MachineResultFuse.Apply(envelope, options, MaxDocumentBytes).Document);
         return resolvedExitCode;
     }
 

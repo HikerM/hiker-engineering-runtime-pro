@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics;
 
 namespace Hiker.Pro.Activation;
 
@@ -137,17 +138,26 @@ public sealed class RuntimeActivationManager(string hikerHome, IRuntimePackagePr
     {
         var fullRoot = Path.GetFullPath(root);
         var files = new List<string>();
-        long bytes = 0;
-        foreach (var path in Directory.EnumerateFiles(fullRoot, "*", SearchOption.AllDirectories))
+        long bytes = 0; var directories = 0; var entries = 0; var timer = Stopwatch.StartNew();
+        var pending = new Queue<(string Path, int Depth)>(); pending.Enqueue((fullRoot, 0));
+        while (pending.Count > 0)
         {
-            if (files.Count >= MaxFiles) throw new InvalidDataException("Runtime package exceeds the file budget");
-            var info = new FileInfo(path);
-            if ((info.Attributes & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("Runtime package contains a reparse point");
-            bytes = checked(bytes + info.Length);
-            if (bytes > MaxBytes) throw new InvalidDataException("Runtime package exceeds the byte budget");
-            var relative = Path.GetRelativePath(fullRoot, path).Replace('\\', '/');
-            if (relative == ".." || relative.StartsWith("../", StringComparison.Ordinal)) throw new InvalidDataException("Runtime package path escapes staging");
-            files.Add(relative);
+            var (current, depth) = pending.Dequeue(); directories++;
+            if (directories > 2048 || depth > 12 || timer.ElapsedMilliseconds > 30000) throw new InvalidDataException("TRAVERSAL_LIMIT_REACHED:runtime package");
+            if (File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint)) throw new InvalidDataException("Runtime package contains a reparse point");
+            var children = Directory.EnumerateFileSystemEntries(current, "*", SearchOption.TopDirectoryOnly).Take(4097).ToArray();
+            if (children.Length > 4096) throw new InvalidDataException("TRAVERSAL_LIMIT_REACHED:entries per directory");
+            foreach (var path in children)
+            {
+                entries++; if (entries > 20000) throw new InvalidDataException("TRAVERSAL_LIMIT_REACHED:runtime package entries");
+                var attributes = File.GetAttributes(path); if (attributes.HasFlag(FileAttributes.ReparsePoint)) throw new InvalidDataException("Runtime package contains a reparse point");
+                if (Directory.Exists(path)) { pending.Enqueue((path, depth + 1)); continue; }
+                if (files.Count >= MaxFiles) throw new InvalidDataException("Runtime package exceeds the file budget");
+                var info = new FileInfo(path); bytes = checked(bytes + info.Length); if (bytes > MaxBytes) throw new InvalidDataException("Runtime package exceeds the byte budget");
+                var relative = Path.GetRelativePath(fullRoot, path).Replace('\\', '/');
+                if (relative == ".." || relative.StartsWith("../", StringComparison.Ordinal)) throw new InvalidDataException("Runtime package path escapes staging");
+                files.Add(relative);
+            }
         }
         if (!files.Contains("hiker.exe", StringComparer.OrdinalIgnoreCase)) throw new InvalidDataException("Runtime package is missing hiker.exe");
         return files.OrderBy(static value => value, StringComparer.Ordinal).ToArray();

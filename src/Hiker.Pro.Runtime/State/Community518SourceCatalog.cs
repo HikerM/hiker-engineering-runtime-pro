@@ -13,6 +13,7 @@ internal sealed record Community518Source(
 internal static class Community518SourceCatalog
 {
     private const int MaxFiles = 100_000;
+    private const long MaxSourceBytes = 16L * 1024 * 1024;
 
     private static readonly IReadOnlyDictionary<string, SourcePolicy> ExactFiles =
         new Dictionary<string, SourcePolicy>(StringComparer.OrdinalIgnoreCase)
@@ -117,6 +118,12 @@ internal static class Community518SourceCatalog
     {
         try
         {
+            var info = new FileInfo(source.Path);
+            if (info.Length > MaxSourceBytes)
+            {
+                reason = "SOURCE_BYTE_BUDGET_EXCEEDED";
+                return false;
+            }
             var payload = File.ReadAllText(source.Path);
             using var document = JsonDocument.Parse(payload, new JsonDocumentOptions { MaxDepth = 128 });
             if (document.RootElement.ValueKind != JsonValueKind.Object)
@@ -198,8 +205,16 @@ internal static class Community518SourceCatalog
     {
         var directory = layout.ResolveAiRelativePath(relativeDirectory);
         if (!Directory.Exists(directory)) return;
-        values.AddRange(Directory.EnumerateFiles(directory, pattern, SearchOption.TopDirectoryOnly).Select(path =>
-            new Community518Source(path, kind, StateLifecycle.Valid, RetentionTier.Hot, semanticType, "legacy-object")));
+        var remaining = MaxFiles - values.Count;
+        if (remaining <= 0) throw new InvalidOperationException($"Community import exceeds the {MaxFiles} file safety budget");
+        var files = Directory.EnumerateFiles(directory, pattern, SearchOption.TopDirectoryOnly).Take(remaining + 1).ToArray();
+        if (files.Length > remaining) throw new InvalidOperationException($"Community import exceeds the {MaxFiles} file safety budget");
+        foreach (var path in files)
+        {
+            var relative = Path.GetRelativePath(layout.AiRoot, path);
+            var safe = layout.ResolveAiRelativePath(relative);
+            values.Add(new Community518Source(safe, kind, StateLifecycle.Valid, RetentionTier.Hot, semanticType, "legacy-object"));
+        }
     }
 
     private static bool HasPattern(ProjectLayout layout, string relativeDirectory, string pattern)

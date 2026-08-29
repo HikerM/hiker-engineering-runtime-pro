@@ -23,10 +23,10 @@ internal sealed class CommunityCurrentWorkInspector(ProjectLayout layout, IState
         var taskKey = new StateKey(projectId, EntityKinds.Task, taskId).Normalize();
         var goalCurrent = await store.ReadAsync(goalKey, cancellationToken).ConfigureAwait(false);
         var taskCurrent = await store.ReadAsync(taskKey, cancellationToken).ConfigureAwait(false);
-        var revision = Revision(goalSource.Payload);
+        var revision = GoalRevision(goalSource.Payload);
         return new CommunityCurrentWork(
             SnapshotOrCurrent(goalKey, goalCurrent, revision, goalSource),
-            SnapshotOrCurrent(taskKey, taskCurrent, Math.Max(revision, Revision(taskSource.Payload)), taskSource),
+            SnapshotOrCurrent(taskKey, taskCurrent, TaskGoalRevision(taskSource.Payload, revision), taskSource),
             4);
     }
 
@@ -137,9 +137,9 @@ internal sealed class CommunityCurrentWorkInspector(ProjectLayout layout, IState
         return null;
     }
 
-    private static long Revision(JsonElement payload)
+    private static long GoalRevision(JsonElement payload)
     {
-        foreach (var property in new[] { "goal_revision", "revision", "plan_version" })
+        foreach (var property in new[] { "goal_revision", "revision" })
         {
             if (payload.TryGetProperty(property, out var value) && value.TryGetInt64(out var revision))
             {
@@ -148,6 +148,16 @@ internal sealed class CommunityCurrentWorkInspector(ProjectLayout layout, IState
         }
 
         return 0;
+    }
+
+    private static long TaskGoalRevision(JsonElement payload, long currentGoalRevision)
+    {
+        if (payload.TryGetProperty("goal_revision", out var value) && value.TryGetInt64(out var revision))
+        {
+            return Math.Max(0, revision);
+        }
+
+        return currentGoalRevision;
     }
 
     private sealed record CommunitySource(
