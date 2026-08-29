@@ -1,5 +1,16 @@
 # Changelog
 
+## 5.19.0-rc.14 — Unreleased
+
+### Fixed
+
+- 修正 Pro 的 Community 依赖事实漂移：发布 Gate 现在锁定已通过完整 Self Governance 的公开 `main@d3aeaa3b952b145dc66590d594e22cf7394007ba` 与真实版本 `5.19.0+codex.20260828142913`，而不是已被后续 Bridge 修复替代的旧合并点。
+- 将候选状态文档与已完成的 Live Adoption Field 证据对齐，同时继续明确真实客户长期运行仍未证明。
+
+### Verification
+
+- rc.14 必须在本提交上重新生成全部测试、规模场景、真实集成、Codex Runtime、签名包与商业 Gate 证据；不得复用旧 RC 的发布结论。
+
 ## 5.19.0-rc.9 — Unreleased
 
 ### Added

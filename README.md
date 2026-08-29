@@ -6,7 +6,7 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 
 ## 不变量
 
-- Public Community 5.18 保持免费且不包含 Pro 实现。
+- Public Community 保持免费且只提供轻量能力与薄 Bridge，不包含 Pro 实现。
 - 模型负责需求理解、架构推理、实现与诊断；Runtime 负责状态、CAS、租约、验证和确定性边界。
 - Agent 推理期间不持有数据库事务或写锁。
 - Cache 与 Materialized View 永远不是权威事实。
@@ -17,12 +17,12 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 
 | 项目 | 当前值 |
 | --- | --- |
-| Pro 产品版本 | `5.19.0-rc.13` |
+| Pro 产品版本 | `5.19.0-rc.14` |
 | Runtime 版本 | `0.1.0` |
 | State Schema | `3.0.0` |
 | Runtime | .NET 9；`win-x64` 发行包自包含 Runtime，目标机无需预装 .NET |
-| Community 基线 | `HikerM/hiker-workflow-skill-pack` `main@8a612eb499c57be6a2c7da4d6dfd11d97d6c599d` |
-| Community 版本 | `5.18.0+codex.20260826161321` |
+| Community 基线 | `HikerM/hiker-workflow-skill-pack` `main@d3aeaa3b952b145dc66590d594e22cf7394007ba` |
+| Community 版本 | `5.19.0+codex.20260828142913` |
 | Pro 仓库 | `HikerM/hiker-engineering-runtime-pro`，Private |
 
 设计与证据入口：
@@ -80,8 +80,8 @@ Community 5.18 导入的运行控制事实不会被激活为 5.19 Runtime Writer
 
 | 验证面 | 结果 | 证据等级 |
 | --- | --- | --- |
-| Unit / Integration | 当前源码 201/201 PASS（含 `FIELD-5.19-001`、Live Adoption、CLI Bridge Contract、Legacy Auto Convergence、Runtime Activation、Environment & Resource Control Plane、Change Intelligence、Project Identity/Bootstrap、Legacy Finalize 与无全局 .NET 自包含执行回归）；最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
-| Community 5.18 回归 | 五插件合计 309/309 PASS；核心 82/82、Community→Pro Bridge 12/12，公开工作区保持干净 | `DETERMINISTIC_VERIFIED` |
+| Unit / Integration | rc.13 前序提交 225/225 PASS（含 `FIELD-5.19-001`、Live Adoption、CLI Bridge Contract、Legacy Auto Convergence、Runtime Activation、Environment & Resource Control Plane、Change Intelligence、Project Identity/Bootstrap、Legacy Finalize 与无全局 .NET 自包含执行回归）；rc.14 最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
+| Community 回归 | 锁定的公开 `main@d3aeaa3` 五插件 344/344 PASS；核心 117/117，完整 Self Governance `PASS_FOR_PACKAGING` | `DETERMINISTIC_VERIFIED` |
 | Environment Control | 本机直接接管、真实隔离目录、组合 Provider、Runtime/Handoff/Recovery/Release 通过；1,024 条冷历史后 Context/Doctor P95 保持有界 | `REAL_INTEGRATION_PROVEN` |
 | Change Intelligence | LOCAL 零写快路径、共享 Blast、1024 条冷历史有界 Context、最近 3 个真实迁移修复提交的 Fix Loop 影子回放通过；真实 Field 返工改善尚未证明 | `REAL_INTEGRATION_PROVEN` |
 | 加速老化 | 12 个合成月份、1201 Task、120 Goal Revision、120 Handoff、60 Crash | `SIMULATION_PROVEN` |
