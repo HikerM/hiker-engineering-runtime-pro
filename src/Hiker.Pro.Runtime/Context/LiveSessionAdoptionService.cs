@@ -15,9 +15,6 @@ public sealed class LiveSessionAdoptionService(
     TimeProvider? timeProvider = null)
 {
     public const string Authority = "LIVE_SESSION_ADOPTION";
-    private static readonly IReadOnlySet<string> SafeBoundaryProofs = new HashSet<string>(
-        new[] { "TURN_TERMINAL", "NATURAL_CHECKPOINT", "NEW_TASK", "RECOVERY_CHECKPOINT" },
-        StringComparer.Ordinal);
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
     public async Task<LiveAdoptionResult> AdoptAsync(
@@ -29,7 +26,7 @@ public sealed class LiveSessionAdoptionService(
         var sessionFingerprint = LiveAdoptionStateCodec.Hash($"{provider}\0{request.ProviderSessionId.Trim()}");
         var initial = await bootstrap.PreflightAsync(ProjectBootstrapIntent.Read, cancellationToken: cancellationToken).ConfigureAwait(false);
         var reads = 1;
-        if (!SafeBoundaryProofs.Contains(request.BoundaryProof.Trim().ToUpperInvariant()))
+        if (!LiveSafeBoundary.IsAccepted(request.BoundaryProof))
         {
             return Result(
                 LiveAdoptionStatuses.WaitSafeBoundary,

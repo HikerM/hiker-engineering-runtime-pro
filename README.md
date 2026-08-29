@@ -17,12 +17,12 @@ Hiker 5.19 Pro 是面向长期、异构、大型软件工程的本地商业运�
 
 | 项目 | 当前值 |
 | --- | --- |
-| Pro 产品版本 | `5.19.0-rc.14` |
+| Pro 产品版本 | `5.19.0-rc.15` |
 | Runtime 版本 | `0.1.0` |
 | State Schema | `3.0.0` |
 | Runtime | .NET 9；`win-x64` 发行包自包含 Runtime，目标机无需预装 .NET |
-| Community 基线 | `HikerM/hiker-workflow-skill-pack` `main@d3aeaa3b952b145dc66590d594e22cf7394007ba` |
-| Community 版本 | `5.19.0+codex.20260828142913` |
+| Community 基线 | `HikerM/hiker-workflow-skill-pack` `main@365e6d9777e5b15f62117b34a191f1fa3d8a351b` |
+| Community 版本 | `5.19.0+codex.20260830021714` |
 | Pro 仓库 | `HikerM/hiker-engineering-runtime-pro`，Private |
 
 设计与证据入口：
@@ -80,8 +80,8 @@ Community 5.18 导入的运行控制事实不会被激活为 5.19 Runtime Writer
 
 | 验证面 | 结果 | 证据等级 |
 | --- | --- | --- |
-| Unit / Integration | rc.13 前序提交 225/225 PASS（含 `FIELD-5.19-001`、Live Adoption、CLI Bridge Contract、Legacy Auto Convergence、Runtime Activation、Environment & Resource Control Plane、Change Intelligence、Project Identity/Bootstrap、Legacy Finalize 与无全局 .NET 自包含执行回归）；rc.14 最终数量以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
-| Community 回归 | 锁定的公开 `main@d3aeaa3` 五插件 344/344 PASS；核心 117/117，完整 Self Governance `PASS_FOR_PACKAGING` | `DETERMINISTIC_VERIFIED` |
+| Unit / Integration | rc.15 源码回归 253/253 PASS，新增 Brownfield Current Authority 原子建立、故障注入、CLI Envelope、幂等 attach 与零写重放验证；最终数量仍以同提交商业 Gate 的 TRX 为准 | `DETERMINISTIC_VERIFIED` |
+| Community 回归 | 锁定的公开 `main@365e6d9` 五插件 350/350 PASS；核心 123/123，完整发布与隔离安装 Gate PASS | `DETERMINISTIC_VERIFIED` |
 | Environment Control | 本机直接接管、真实隔离目录、组合 Provider、Runtime/Handoff/Recovery/Release 通过；1,024 条冷历史后 Context/Doctor P95 保持有界 | `REAL_INTEGRATION_PROVEN` |
 | Change Intelligence | LOCAL 零写快路径、共享 Blast、1024 条冷历史有界 Context、最近 3 个真实迁移修复提交的 Fix Loop 影子回放通过；真实 Field 返工改善尚未证明 | `REAL_INTEGRATION_PROVEN` |
 | 加速老化 | 12 个合成月份、1201 Task、120 Goal Revision、120 Handoff、60 Crash | `SIMULATION_PROVEN` |

@@ -1,15 +1,16 @@
 # Changelog
 
-## 5.19.0-rc.14 — Unreleased
+## 5.19.0-rc.15 — Unreleased
 
 ### Fixed
 
-- 修正 Pro 的 Community 依赖事实漂移：发布 Gate 现在锁定已通过完整 Self Governance 的公开 `main@d3aeaa3b952b145dc66590d594e22cf7394007ba` 与真实版本 `5.19.0+codex.20260828142913`，而不是已被后续 Bridge 修复替代的旧合并点。
-- 将候选状态文档与已完成的 Live Adoption Field 证据对齐，同时继续明确真实客户长期运行仍未证明。
+- 新增 `establish-current-authority` 正式机器操作：在唯一 Project、正式 Provider Session 与安全边界下，将 Current Goal 和唯一 active Task 作为同一个 CAS 批次原子建立；来源歧义、状态不活动、指纹不一致和已有冲突均失败关闭。
+- 实体与 operation identity 由 Project、Provider Session 指纹、Authority 来源/指纹/generation 确定性派生；故障注入覆盖提交前全回滚及提交后响应丢失的幂等重放，不创建 Ownership、Lease 或 Worktree。
+- Community 依赖更新到通过 350 项测试、完整发布 Gate 与隔离安装验证的 `main@365e6d9777e5b15f62117b34a191f1fa3d8a351b` / `5.19.0+codex.20260830021714`。
 
 ### Verification
 
-- rc.14 必须在本提交上重新生成全部测试、规模场景、真实集成、Codex Runtime、签名包与商业 Gate 证据；不得复用旧 RC 的发布结论。
+- rc.15 必须在本提交上重新生成全部测试、签名包与商业 Gate 证据，并在安装后用 NodeTs 真实 Field 完成建立→attach→重复 attach 零写验证；不得复用旧 RC 的发布结论。
 
 ## 5.19.0-rc.9 — Unreleased
 

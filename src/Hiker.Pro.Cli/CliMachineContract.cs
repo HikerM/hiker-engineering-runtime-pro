@@ -54,7 +54,9 @@ internal static class CliMachineContract
 
     private static bool IsSuccessfulStatus(string status) => status is
         "ACTIVE_EXISTING_PROJECT" or
+        "ADOPT_EXISTING_AUTHORITY" or
         "ALREADY_ADOPTED" or
+        "ALREADY_ESTABLISHED" or
         "ALREADY_COMPLETED" or
         "ALREADY_FINALIZED" or
         "ALREADY_IMPORTED" or
@@ -63,6 +65,7 @@ internal static class CliMachineContract
         "COMPLETE" or
         "CREATED" or
         "FINALIZED" or
+        "ESTABLISHED" or
         "HEALTHY" or
         "IDEMPOTENT_REPLAY" or
         "IMPORTED" or

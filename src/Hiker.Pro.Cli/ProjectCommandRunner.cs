@@ -120,6 +120,59 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
                     Write(new { project_id = active.ProjectId, result });
                     return result.Status == "COMPLETE" ? 0 : 2;
                 }
+            case "establish-current-authority":
+                {
+                    var providerSession = ResolveProviderSession(args);
+                    var boundaryProof = ValueAfter(args, "--boundary-proof") ??
+                        System.Environment.GetEnvironmentVariable("HIKER_SAFE_BOUNDARY") ??
+                        throw new ArgumentException("establish-current-authority requires a host-confirmed safe boundary");
+                    var active = await bootstrap.RequireActiveAsync(ProjectBootstrapIntent.Read, suppliedProjectId).ConfigureAwait(false);
+                    var establishment = await new CurrentAuthorityEstablishmentService(store, state, bootstrap)
+                        .EstablishAsync(new CurrentAuthorityEstablishmentRequest(
+                            active.ProjectId!,
+                            providerSession.Provider,
+                            providerSession.SessionId,
+                            boundaryProof,
+                            new CurrentAuthorityFact(
+                                RequiredValue(args, "--goal-statement", "establish-current-authority"),
+                                RequiredValue(args, "--goal-state", "establish-current-authority"),
+                                RequiredValue(args, "--goal-authority-source", "establish-current-authority"),
+                                RequiredValue(args, "--goal-source-fingerprint", "establish-current-authority"),
+                                ParseNonNegativeInteger(args, "--goal-authority-generation", "establish-current-authority")),
+                            new CurrentAuthorityFact(
+                                RequiredValue(args, "--task-statement", "establish-current-authority"),
+                                RequiredValue(args, "--task-state", "establish-current-authority"),
+                                RequiredValue(args, "--task-authority-source", "establish-current-authority"),
+                                RequiredValue(args, "--task-source-fingerprint", "establish-current-authority"),
+                                ParseNonNegativeInteger(args, "--task-authority-generation", "establish-current-authority")),
+                            ValueAfter(args, "--operation-id"))).ConfigureAwait(false);
+                    var ok = establishment.Status is
+                        CurrentAuthorityStatuses.Established or
+                        CurrentAuthorityStatuses.AlreadyEstablished or
+                        CurrentAuthorityStatuses.AdoptExistingAuthority;
+                    Write(new
+                    {
+                        ok,
+                        establishment.Status,
+                        establishment.ProjectId,
+                        establishment.GoalId,
+                        establishment.TaskId,
+                        establishment.GoalAuthoritySource,
+                        establishment.TaskAuthoritySource,
+                        establishment.Provider,
+                        establishment.ProviderSessionFingerprint,
+                        establishment.OperationId,
+                        establishment.SafeBoundary,
+                        establishment.StateGenerationBefore,
+                        establishment.StateGenerationAfter,
+                        establishment.StateReads,
+                        establishment.StateWrites,
+                        establishment.IdempotentReplay,
+                        establishment.Reasons,
+                        project = establishment.Project
+                    });
+                    return ok ? 0 : 2;
+                }
             case "attach":
                 {
                     var providerSession = ResolveProviderSession(args);
@@ -371,6 +424,17 @@ internal sealed class ProjectCommandRunner(string root, JsonSerializerOptions js
         if (value is null) return fallback;
         if (!int.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
             throw new ArgumentException($"{name} must be an integer");
+        return parsed;
+    }
+
+    private static string RequiredValue(string[] values, string name, string commandName) =>
+        ValueAfter(values, name) ?? throw new ArgumentException($"{commandName} requires {name} <value>");
+
+    private static long ParseNonNegativeInteger(string[] values, string name, string commandName)
+    {
+        var value = RequiredValue(values, name, commandName);
+        if (!long.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsed) || parsed < 0)
+            throw new ArgumentException($"{name} must be a non-negative integer");
         return parsed;
     }
 
