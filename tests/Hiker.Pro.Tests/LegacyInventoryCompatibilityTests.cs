@@ -147,6 +147,70 @@ public sealed class LegacyInventoryCompatibilityTests
         }
     }
 
+    [Fact]
+    public async Task OversizedArchivedRiskEvidence_IsPreservedWithoutImportOrBlockingMigration()
+    {
+        var root = NewRoot();
+        try
+        {
+            await WriteAsync(root, "governance/ownership.json", "{\"schema_version\":\"3.0.0\",\"rules\":[]}");
+            await WriteOversizedFileAsync(root, "evidence/risk/latest.json");
+            var evidence = Path.Combine(root, ".ai", "evidence", "risk", "latest.json");
+            var beforeHash = HashFile(evidence);
+            var beforeLength = new FileInfo(evidence).Length;
+
+            var migration = await RunCliAsync(root, "migrate-community");
+            var result = Json(migration);
+            var import = result.GetProperty("import");
+            var projectId = import.GetProperty("project_id").GetString();
+
+            Assert.Equal(0, migration.ExitCode);
+            Assert.Equal("IMPORTED", import.GetProperty("status").GetString());
+            Assert.Equal(0, import.GetProperty("inventory").GetProperty("unknown_requires_review").GetInt32());
+            Assert.Contains(
+                import.GetProperty("inventory").GetProperty("entries").EnumerateArray(),
+                static item => item.GetProperty("path").GetString() == "evidence/risk/latest.json" &&
+                               item.GetProperty("handling").GetString() == "BOUNDED_SOURCE_PRESERVE_ONLY" &&
+                               item.GetProperty("migratable_facts").GetInt32() == 0);
+            await using (var store = new SqliteStateStore(new ProjectLayout(root)))
+            {
+                Assert.Null(await store.ReadAsync(new StateKey(projectId!, EntityKinds.Evidence, "evidence:risk:latest.json")));
+            }
+            Assert.Equal(beforeLength, new FileInfo(evidence).Length);
+            Assert.Equal(beforeHash, HashFile(evidence));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            DeleteRoot(root);
+        }
+    }
+
+    [Fact]
+    public async Task OversizedActiveRequirement_RemainsBlockedAsUnknownSchema()
+    {
+        var root = NewRoot();
+        try
+        {
+            await WriteAsync(root, "governance/ownership.json", "{\"schema_version\":\"3.0.0\",\"rules\":[]}");
+            await WriteOversizedFileAsync(root, "requirements/ledger.json");
+
+            var migration = await RunCliAsync(root, "migrate-community");
+            var result = Json(migration);
+
+            Assert.Equal(2, migration.ExitCode);
+            Assert.Equal("UNKNOWN_SCHEMA", result.GetProperty("project").GetProperty("reason_code").GetString());
+            Assert.Contains(
+                result.GetProperty("project").GetProperty("ai_content").GetProperty("unknown_items").EnumerateArray(),
+                static item => item.GetString()!.Contains("SOURCE_BYTE_BUDGET_EXCEEDED", StringComparison.Ordinal));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            DeleteRoot(root);
+        }
+    }
+
     private static async Task WriteKnownLegacyFixtureAsync(string root)
     {
         await WriteAsync(root, "governance/ownership.json", "{\"schema_version\":\"3.0.0\",\"rules\":[]}");
@@ -186,6 +250,15 @@ public sealed class LegacyInventoryCompatibilityTests
         var path = Path.Combine(root, ".ai", relative.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllBytesAsync(path, payload);
+    }
+
+    private static async Task WriteOversizedFileAsync(string root, string relative)
+    {
+        var path = Path.Combine(root, ".ai", relative.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        await stream.WriteAsync(Encoding.UTF8.GetBytes("{\"schema_version\":1,\"risk\":{}"));
+        stream.SetLength(16L * 1024 * 1024 + 1);
     }
 
     private static string HashFile(string path) =>

@@ -141,6 +141,24 @@ internal static class Community518SourceCatalog
         }
     }
 
+    public static bool CanPreserveWithoutImport(Community518Source source, string reason) =>
+        string.Equals(reason, "SOURCE_BYTE_BUDGET_EXCEEDED", StringComparison.Ordinal) &&
+        source.Kind == EntityKinds.Evidence &&
+        source.Lifecycle == StateLifecycle.Archived;
+
+    public static bool RequiresPreserveOnly(Community518Source source)
+    {
+        try
+        {
+            return new FileInfo(source.Path).Length > MaxSourceBytes &&
+                   CanPreserveWithoutImport(source, "SOURCE_BYTE_BUDGET_EXCEEDED");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     public static bool TryValidate(JsonElement root, string profile, out string reason)
     {
         if (root.ValueKind != JsonValueKind.Object)

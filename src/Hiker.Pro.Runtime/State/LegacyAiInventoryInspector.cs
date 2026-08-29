@@ -173,6 +173,19 @@ internal static class LegacyAiInventoryInspector
                     if (Community518SourceCatalog.TryResolve(relative, item, out var source))
                     {
                         if (Community518SourceCatalog.TryValidate(source, out var reason)) count++;
+                        else if (Community518SourceCatalog.CanPreserveWithoutImport(source, reason))
+                        {
+                            entries.Add(new LegacyInventoryEntry(
+                                relative,
+                                $"{source.SemanticType}_OVERSIZED_SOURCE",
+                                new[]
+                                {
+                                    LegacyInventoryClassifications.KnownLegacyContent,
+                                    LegacyInventoryClassifications.SafePreservedContent
+                                },
+                                "BOUNDED_SOURCE_PRESERVE_ONLY",
+                                0));
+                        }
                         else
                         {
                             AddUnknown(unknown, $"{relative}:UNKNOWN_LEGACY_SCHEMA:{reason}");

@@ -49,6 +49,13 @@ public sealed class Community518Importer(ProjectLayout layout, StateCoordinator 
         {
             cancellationToken.ThrowIfCancellationRequested();
             var relative = Path.GetRelativePath(layout.AiRoot, source.Path).Replace('\\', '/');
+            if (Community518SourceCatalog.RequiresPreserveOnly(source))
+            {
+                // Known archived evidence that exceeds the bounded import budget remains
+                // immutable at its source path. It is neither parsed nor promoted into
+                // State Plane authority.
+                continue;
+            }
             string payload;
             try
             {
