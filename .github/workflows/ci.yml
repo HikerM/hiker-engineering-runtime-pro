@@ -22,7 +22,12 @@ jobs:
         with:
           node-version: 22
       - name: Install pinned Codex CLI for adapter probe
-        run: npm install --global @openai/codex@0.151.0
+        run: |
+          npm install --global @openai/codex@0.151.0
+          ./.github/scripts/Install-CodexNativeShim.ps1 `
+            -PackageRoot (npm root --global) `
+            -DestinationRoot (Join-Path $env:RUNNER_TEMP 'hiker-codex-bin') `
+            -GitHubPathFile $env:GITHUB_PATH
       - name: Restore
         run: dotnet restore Hiker.Pro.slnx
       - name: Version facts
