@@ -18,12 +18,14 @@ if (-not (Test-Path -LiteralPath $codexPackage -PathType Container)) {
 }
 
 $nativePackage = Join-Path -Path ([System.IO.Path]::GetFullPath($PackageRoot)) -ChildPath '@openai\codex-win32-x64'
-if (-not (Test-Path -LiteralPath $nativePackage -PathType Container)) {
-    throw 'CODEX_NATIVE_PLATFORM_PACKAGE_NOT_FOUND'
+$searchRoots = @($codexPackage)
+if (Test-Path -LiteralPath $nativePackage -PathType Container) {
+    $searchRoots += $nativePackage
 }
 
-$candidates = @(Get-ChildItem -LiteralPath $nativePackage -Filter 'codex.exe' -File -Recurse |
-    Sort-Object -Property FullName)
+$candidates = @($searchRoots |
+    ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter 'codex.exe' -File -Recurse } |
+    Sort-Object -Property FullName -Unique)
 if ($candidates.Count -ne 1) {
     throw "CODEX_NATIVE_EXECUTABLE_AMBIGUOUS:count=$($candidates.Count)"
 }
