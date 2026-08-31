@@ -370,25 +370,6 @@ public sealed class LiveSessionAdoptionService(
             string.Equals(active.Status, "ACTIVE", StringComparison.Ordinal));
         ProviderSessionBindingState? interruptedBinding = null;
         if (competingBinding is not null &&
-            !string.Equals(request.BoundaryProof.Trim(), "RECOVERY_CHECKPOINT", StringComparison.OrdinalIgnoreCase))
-        {
-            return Result(
-                LiveAdoptionStatuses.WaitSafeBoundary,
-                project,
-                provider,
-                sessionFingerprint,
-                goal.Key.EntityId,
-                task.Key.EntityId,
-                checkpoint.State?.Key.EntityId,
-                false,
-                false,
-                "WAIT_EXISTING_PROVIDER_SESSION_CHECKPOINT",
-                reads,
-                0,
-                null,
-                new[] { "ACTIVE_PROVIDER_SESSION_BOUND" });
-        }
-        if (competingBinding is not null &&
             !LiveAdoptionStateCodec.TryBinding(competingBinding, out interruptedBinding))
         {
             return Result(
@@ -406,6 +387,33 @@ public sealed class LiveSessionAdoptionService(
                 0,
                 null,
                 new[] { "PROVIDER_SESSION_BINDING_INVALID" });
+        }
+        var providerHostRestartConfirmed = false;
+        if (competingBinding is not null && interruptedBinding is not null &&
+            !string.Equals(request.BoundaryProof.Trim(), "RECOVERY_CHECKPOINT", StringComparison.OrdinalIgnoreCase))
+        {
+            providerHostRestartConfirmed = await processProbe.CanProveProviderHostRestartedAsync(
+                provider,
+                interruptedBinding.AttachedAt,
+                cancellationToken).ConfigureAwait(false);
+            if (!providerHostRestartConfirmed)
+            {
+                return Result(
+                    LiveAdoptionStatuses.WaitSafeBoundary,
+                    project,
+                    provider,
+                    sessionFingerprint,
+                    goal.Key.EntityId,
+                    task.Key.EntityId,
+                    checkpoint.State?.Key.EntityId,
+                    false,
+                    false,
+                    "WAIT_EXISTING_PROVIDER_SESSION_CHECKPOINT",
+                    reads,
+                    0,
+                    null,
+                    new[] { "ACTIVE_PROVIDER_SESSION_BOUND" });
+            }
         }
 
         var ownershipKey = new StateKey(projectId, EntityKinds.Ownership, task.Key.EntityId);
@@ -610,7 +618,9 @@ public sealed class LiveSessionAdoptionService(
                 checkpoint_id = checkpointId,
                 provider,
                 provider_session_fingerprint = sessionFingerprint,
-                safe_boundary = request.BoundaryProof.Trim().ToUpperInvariant(),
+                safe_boundary = providerHostRestartConfirmed
+                    ? "PROVIDER_HOST_RESTART_CONFIRMED"
+                    : request.BoundaryProof.Trim().ToUpperInvariant(),
                 status = "PASS",
                 observed_at = now
             },
@@ -709,7 +719,9 @@ public sealed class LiveSessionAdoptionService(
             reads + contextPackage.StateReads,
             commit.Status == "IDEMPOTENT_REPLAY" ? 0 : mutations.Count,
             contextPackage,
-            Array.Empty<string>());
+            providerHostRestartConfirmed
+                ? new[] { "PROVIDER_HOST_RESTART_CONFIRMED" }
+                : Array.Empty<string>());
     }
 
     private static LiveAdoptionResult Result(
