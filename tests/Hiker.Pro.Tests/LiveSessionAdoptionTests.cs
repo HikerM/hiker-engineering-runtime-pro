@@ -215,6 +215,27 @@ public sealed class LiveSessionAdoptionTests
     }
 
     [Fact]
+    public async Task DifferentProviderSession_AfterConfirmedCodexHostRestart_ArchivesOldBindingAutomatically()
+    {
+        await using var project = await TestProject.CreateAsync(ProjectId);
+        await SeedCurrentWorkAsync(project);
+        var service = Service(project, static (provider, _, _) =>
+            Task.FromResult(string.Equals(provider, "codex", StringComparison.Ordinal)));
+        Assert.Equal(LiveAdoptionStatuses.Adopted, (await service.AdoptAsync(Request(session: "session-one"))).Status);
+
+        var recovered = await service.AdoptAsync(Request(session: "session-two"));
+        var bindings = await project.Store.ReadAsync(ProjectId, EntityKinds.ProviderSessionBinding, lifecycle: null, limit: 8);
+        var tasks = await project.Store.ReadAsync(ProjectId, EntityKinds.Task, lifecycle: null, limit: 8);
+
+        Assert.Equal(LiveAdoptionStatuses.Adopted, recovered.Status);
+        Assert.Contains("PROVIDER_HOST_RESTART_CONFIRMED", recovered.Reasons);
+        Assert.Equal("task-current", recovered.TaskId);
+        Assert.Single(bindings, static item => item.Lifecycle == StateLifecycle.Valid);
+        Assert.Single(bindings, static item => item.Lifecycle == StateLifecycle.Archived);
+        Assert.Single(tasks, static item => item.Key.EntityId == "task-current");
+    }
+
+    [Fact]
     public async Task MultipleCurrentGoals_BlockWithoutGuessingOrWriting()
     {
         await using var project = await TestProject.CreateAsync(ProjectId);
@@ -564,7 +585,7 @@ public sealed class LiveSessionAdoptionTests
     {
         await using var project = await TestProject.CreateAsync(ProjectId);
         await SeedCurrentWorkAsync(project);
-        var service = Service(project);
+        var service = Service(project, static (_, _, _) => Task.FromResult(false));
         Assert.Equal(LiveAdoptionStatuses.Adopted, (await service.AdoptAsync(Request(session: "session-one"))).Status);
 
         var blocked = await service.AdoptAsync(Request(session: "session-two"));
@@ -682,12 +703,14 @@ public sealed class LiveSessionAdoptionTests
         Assert.All(activeEdges, static edge => Assert.Contains(edge.Relation, new[] { "CHECKPOINTED_AT", "PROVEN_BY" }));
     }
 
-    private static LiveSessionAdoptionService Service(TestProject project) => new(
+    private static LiveSessionAdoptionService Service(
+        TestProject project,
+        Func<string, DateTimeOffset, CancellationToken, Task<bool>>? providerHostRestartProof = null) => new(
         project.Layout,
         project.Store,
         project.Coordinator,
         project.Bootstrap,
-        new ProcessIdentityProbe());
+        new ProcessIdentityProbe(providerHostRestartProof));
 
     private static LiveAdoptionRequest Request(string boundary = "TURN_TERMINAL", string session = "provider-session-secret") => new(
         "codex",

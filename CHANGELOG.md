@@ -1,5 +1,17 @@
 # Changelog
 
+## 5.19.0-rc.16 — Unreleased
+
+### Fixed
+
+- Codex 完整宿主重启后，Live Adoption 可以用宿主进程启动身份确定性证明旧 Provider Session 已不可能存活，并在既有 Adoption 事务内归档旧绑定、复用同一 Goal/Task 后继续接管。
+- 进程年龄本身不构成回收证明；只要仍观察到可能属于旧宿主的进程、无法读取进程身份、Provider 不是 Codex 或缺少当前 Codex Session，仍保持 `WAIT_SAFE_BOUNDARY`，不会创建第二个 Task、Writer、Lease 或 Worktree。
+- Community 依赖更新到候选 `fix/ga-5.19-field-closure@b29c7ca6c21ff0c3bbfb14fd65195fd799e3a9dc` / `5.19.0+codex.20260831013125`；公开候选仍为 Draft，未合并 `main`。
+
+### Verification
+
+- 私有源码回归 254/254 PASS；同提交签名包、CI、安装后原 NodeTs Codex 会话自动接管与 Checkpoint/Evidence Field 仍须完成后才能判定本候选通过。
+
 ## 5.19.0-rc.15 — Unreleased
 
 ### Fixed
