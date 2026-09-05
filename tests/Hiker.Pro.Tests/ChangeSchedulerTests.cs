@@ -41,15 +41,55 @@ public sealed class ChangeSchedulerTests
         Assert.Equal("FIX_LOOP_PATCHING_DISABLED", disposition.ReasonCode);
     }
 
+    [Fact]
+    public async Task ConflictingGoalRevisionsAreDeferredInsteadOfRunningTwoWriters()
+    {
+        await using var project = await TestProject.CreateAsync("change-scheduler-goal-revision");
+        var candidates = new[]
+        {
+            Candidate("goal-old", "writer-old", "src/shared", goalId: "GOAL-1", goalRevision: 4, goalFingerprint: "goal-4"),
+            Candidate("goal-new", "writer-new", "src/other", goalId: "GOAL-1", goalRevision: 5, goalFingerprint: "goal-5")
+        };
+
+        var result = await new ConflictAwareScheduler(project.Coordinator).EvaluateAsync(project.ProjectId!, candidates, 3);
+
+        Assert.All(result.Dispositions, item => Assert.Equal("DEFERRED", item.Status));
+        Assert.All(result.Dispositions, item => Assert.Equal("GOAL_REVISION_CONFLICT", item.ReasonCode));
+    }
+
+    [Fact]
+    public async Task DifferentSourceSnapshotsCannotMutateAnOverlappingScope()
+    {
+        await using var project = await TestProject.CreateAsync("change-scheduler-source-snapshot");
+        var candidates = new[]
+        {
+            Candidate("source-a", "writer-a", "src/shared", sourceFingerprint: "source-a"),
+            Candidate("source-b", "writer-b", "src/shared/api", sourceFingerprint: "source-b")
+        };
+
+        var result = await new ConflictAwareScheduler(project.Coordinator).EvaluateAsync(project.ProjectId!, candidates, 3);
+
+        Assert.All(result.Dispositions, item => Assert.Equal("DEFERRED", item.Status));
+        Assert.All(result.Dispositions, item => Assert.Equal("SOURCE_SNAPSHOT_CONFLICT", item.ReasonCode));
+    }
+
     private static SchedulingCandidate Candidate(
         string taskId,
         string laneId,
         string scope,
-        ChangeExecutionPolicy? policy = null) => new(
+        ChangeExecutionPolicy? policy = null,
+        string? goalId = null,
+        long? goalRevision = null,
+        string? goalFingerprint = null,
+        string? sourceFingerprint = null) => new(
         taskId,
         laneId,
         AgentLaneRole.Writer,
         EngineeringRisk.Medium,
         new[] { scope },
-        ChangePolicy: policy);
+        ChangePolicy: policy,
+        GoalId: goalId,
+        GoalRevision: goalRevision,
+        GoalFingerprint: goalFingerprint,
+        SourceFingerprint: sourceFingerprint);
 }
