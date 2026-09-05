@@ -29,7 +29,11 @@ public sealed record SchedulingCandidate(
     IReadOnlyList<ResourceRequirement>? ResourceRequirements = null,
     string? EnvironmentProfileId = null,
     string? EnvironmentInstanceId = null,
-    ChangeExecutionPolicy? ChangePolicy = null);
+    ChangeExecutionPolicy? ChangePolicy = null,
+    string? GoalId = null,
+    long? GoalRevision = null,
+    string? GoalFingerprint = null,
+    string? SourceFingerprint = null);
 
 public sealed record SchedulingDisposition(
     string TaskId,
@@ -83,6 +87,8 @@ public sealed class ConflictAwareScheduler(StateCoordinator state)
             .Select(EnvironmentStateCodec.Parse<EnvironmentResourceLease>)
             .Where(static lease => lease.Status == "ACTIVE")
             .ToArray();
+        var validGoals = await state.ReadAsync(projectId, EntityKinds.Goal, StateLifecycle.Valid, 32, cancellationToken).ConfigureAwait(false);
+        var currentGoalRevision = validGoals.Count == 0 ? (long?)null : validGoals.Max(static item => item.GoalRevision);
         var highRiskPresent = candidates.Any(static candidate => candidate.Role == AgentLaneRole.Writer &&
             (candidate.Risk >= EngineeringRisk.High || candidate.ChangePolicy?.RequiresSingleWriter == true));
         var writerCapacity = highRiskPresent ? 1 : maximumWriterLanes;
@@ -90,6 +96,8 @@ public sealed class ConflictAwareScheduler(StateCoordinator state)
         var admittedResources = new List<ResourceRequirement>();
         var admittedWriters = 0;
         var dispositions = new List<SchedulingDisposition>();
+        var goalRevisionConflicts = GoalRevisionConflicts(writers);
+        var sourceSnapshotConflicts = SourceSnapshotConflicts(writers);
 
         foreach (var candidate in candidates.OrderBy(static item => item.Role)
                      .ThenByDescending(static item => ChangePriority(item.ChangePolicy))
@@ -98,6 +106,22 @@ public sealed class ConflictAwareScheduler(StateCoordinator state)
         {
             Validate(candidate);
             var scopes = AffectedScopePolicy.Normalize(candidate.PredictedAffectedScopes.Concat(candidate.DependencyScopes ?? Array.Empty<string>()).ToArray());
+            if (candidate.Role == AgentLaneRole.Writer && goalRevisionConflicts.Contains(candidate.TaskId))
+            {
+                dispositions.Add(new SchedulingDisposition(candidate.TaskId, candidate.LaneId, "DEFERRED", "GOAL_REVISION_CONFLICT", scopes));
+                continue;
+            }
+            if (candidate.Role == AgentLaneRole.Writer && sourceSnapshotConflicts.Contains(candidate.TaskId))
+            {
+                dispositions.Add(new SchedulingDisposition(candidate.TaskId, candidate.LaneId, "DEFERRED", "SOURCE_SNAPSHOT_CONFLICT", scopes));
+                continue;
+            }
+            if (candidate.Role == AgentLaneRole.Writer && currentGoalRevision is not null && candidate.GoalRevision is not null && candidate.GoalRevision != currentGoalRevision)
+            {
+                var revisionReason = candidate.GoalRevision < currentGoalRevision ? "STALE_GOAL_REVISION" : "GOAL_REVISION_NOT_COMMITTED";
+                dispositions.Add(new SchedulingDisposition(candidate.TaskId, candidate.LaneId, "DEFERRED", revisionReason, scopes));
+                continue;
+            }
             if (candidate.Role == AgentLaneRole.Assurance)
             {
                 var target = candidates.SingleOrDefault(item => item.Role == AgentLaneRole.Writer && item.TaskId == candidate.AssuresTaskId);
@@ -196,6 +220,12 @@ public sealed class ConflictAwareScheduler(StateCoordinator state)
         {
             throw new ArgumentException("Scheduling dependencies or resources are unbounded", nameof(candidate));
         }
+        if (candidate.GoalRevision is < 0 ||
+            (candidate.GoalRevision is not null && string.IsNullOrWhiteSpace(candidate.GoalId)) ||
+            (!string.IsNullOrWhiteSpace(candidate.GoalFingerprint) && string.IsNullOrWhiteSpace(candidate.GoalId)))
+        {
+            throw new ArgumentException("Goal identity is incomplete", nameof(candidate));
+        }
         foreach (var requirement in candidate.ResourceRequirements ?? Array.Empty<ResourceRequirement>())
         {
             EnvironmentContractValidation.Requirement(requirement);
@@ -215,4 +245,37 @@ public sealed class ConflictAwareScheduler(StateCoordinator state)
         ChangeRiskClasses.Local => 1,
         _ => 0
     };
+
+    private static HashSet<string> GoalRevisionConflicts(IReadOnlyList<SchedulingCandidate> writers)
+    {
+        var conflicts = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var group in writers.Where(static item => !string.IsNullOrWhiteSpace(item.GoalId)).GroupBy(static item => item.GoalId!, StringComparer.Ordinal))
+        {
+            var revisions = group.Select(static item => (item.GoalRevision, item.GoalFingerprint)).Distinct().ToArray();
+            if (revisions.Length > 1)
+            {
+                foreach (var candidate in group) conflicts.Add(candidate.TaskId);
+            }
+        }
+        return conflicts;
+    }
+
+    private static HashSet<string> SourceSnapshotConflicts(IReadOnlyList<SchedulingCandidate> writers)
+    {
+        var conflicts = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < writers.Count; i++)
+        {
+            for (var j = i + 1; j < writers.Count; j++)
+            {
+                var left = writers[i];
+                var right = writers[j];
+                if (string.IsNullOrWhiteSpace(left.SourceFingerprint) || string.IsNullOrWhiteSpace(right.SourceFingerprint) ||
+                    string.Equals(left.SourceFingerprint, right.SourceFingerprint, StringComparison.Ordinal) ||
+                    !AffectedScopePolicy.Overlap(left.PredictedAffectedScopes, right.PredictedAffectedScopes)) continue;
+                conflicts.Add(left.TaskId);
+                conflicts.Add(right.TaskId);
+            }
+        }
+        return conflicts;
+    }
 }
